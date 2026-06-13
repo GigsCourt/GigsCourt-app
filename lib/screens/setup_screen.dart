@@ -186,24 +186,32 @@ class _SetupScreenState extends State<SetupScreen> {
                 children: [
                   StepPhoto(
                     onPhotoUploaded: (url) {
-                      _photoUrl = url;
+                      setState(() {
+                        _photoUrl = url;
+                      });
                     },
                   ),
                   StepPersonalInfo(
                     onInfoChanged: (name, bio) {
-                      _name = name;
-                      _bio = bio;
+                      setState(() {
+                        _name = name;
+                        _bio = bio;
+                      });
                     },
                   ),
                   StepAddress(
                     onAddressChanged: (location, address) {
-                      _location = location;
-                      _address = address;
+                      setState(() {
+                        _location = location;
+                        _address = address;
+                      });
                     },
                   ),
                   StepSkills(
                     onSkillsChanged: (skills) {
-                      _selectedSkills = skills;
+                      setState(() {
+                        _selectedSkills = skills;
+                      });
                     },
                   ),
                   const StepHowItWorks(),
