@@ -1,24 +1,20 @@
-const functions = require('firebase-functions');
-const crypto = require('crypto');
+const functions = require("firebase-functions");
+const ImageKit = require("imagekit");
 
-const PRIVATE_KEY = 'YOUR_IMAGEKIT_PRIVATE_KEY';
+const imagekit = new ImageKit({
+  publicKey: "public_YDOcWLpiiHDlpU+y4GXqUjVDEaQ=",
+  privateKey: "private_g6D6+rm4r4+Rh1PqoEDuD+zSmjI=",
+  urlEndpoint: "https://ik.imagekit.io/GigsKourt"
+});
 
 exports.getImageKitToken = functions.https.onCall((data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'You must be logged in');
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'You must be logged in to upload images.'
+    );
   }
 
-  const token = crypto.randomUUID();
-  const expire = Math.floor(Date.now() / 1000) + 3600; // 1 hour
-
-  const signature = crypto
-    .createHmac('sha1', PRIVATE_KEY)
-    .update(token + expire)
-    .digest('hex');
-
-  return {
-    token: token,
-    expire: expire,
-    signature: signature,
-  };
+  const authenticationParameters = imagekit.getAuthenticationParameters();
+  return authenticationParameters;
 });
