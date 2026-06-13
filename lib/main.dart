@@ -1,0 +1,78 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'firebase_options.dart';
+import 'screens/splash_screen.dart';
+import 'screens/wizard_screen.dart';
+import 'screens/signup_screen.dart';
+import 'screens/setup_screen.dart';
+import 'theme/app_theme.dart';
+import 'screens/verify_email_screen.dart';
+import 'screens/login_screen.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  await Supabase.initialize(
+    url: 'https://ucwffnukedmowwxedqzv.supabase.co',
+    publishableKey: 'sb_publishable_mNwlLP9omXRkPNIQzaVKRg_yFUsW6xZ',
+  );
+
+  runApp(const GigsCourtApp());
+}
+
+class GigsCourtApp extends StatelessWidget {
+  const GigsCourtApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'GigsCourt',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      initialRoute: '/splash',
+      routes: {
+        '/splash': (context) => const SplashScreen(),
+        '/wizard': (context) => const WizardScreen(),
+        '/signup': (context) => SignUpScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/verify-email': (context) => const VerifyEmailScreen(),
+        '/setup': (context) => SetupScreen(),
+        '/home': (context) => const Scaffold(
+              body: Center(
+                child: _HomeBody(),
+              ),
+            ),
+      },
+    );
+  }
+}
+
+class _HomeBody extends StatelessWidget {
+  const _HomeBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('Home'),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          onPressed: () async {
+            await FirebaseAuth.instance.signOut();
+            if (context.mounted) {
+              Navigator.of(context).pushReplacementNamed('/splash');
+            }
+          },
+          child: const Text('Logout (Temp)'),
+        ),
+      ],
+    );
+  }
+}
