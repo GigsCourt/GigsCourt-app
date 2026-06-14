@@ -63,7 +63,6 @@ class DefaultFirebaseOptions {
     projectId: 'gigs-court',
     storageBucket: 'gigs-court.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCljRLmO7F3CFreyoGlYVFrLeCqqyoSCxE',
     appId: '1:909805744262:ios:804fcc5b9499bdd9b32107',

@@ -1,14 +1,11 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-const ImageKit = require("imagekit");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
-const imagekit = new ImageKit({
-  publicKey: "public_YDOcWLpiiHDlpU+y4GXqUjVDEaQ=",
-  privateKey: "YOUR_PRIVATE_KEY",
-  urlEndpoint: "https://ik.imagekit.io/GigsKourt"
-});
+const IMAGEKIT_PRIVATE_KEY = "private_g6D6+rm4r4+Rh1PqoEDuD+zSmjI=";
+const IMAGEKIT_PUBLIC_KEY = "public_YDOcWLpiiHDlpU+y4GXqUjVDEaQ=";
 
 exports.getImageKitToken = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
@@ -30,9 +27,19 @@ exports.getImageKitToken = functions.https.onRequest(async (req, res) => {
   
   try {
     await admin.auth().verifyIdToken(idToken);
-    const params = imagekit.getAuthenticationParameters();
-    res.json(params);
+    
+    const token = crypto.randomUUID();
+    const expire = Math.floor(Date.now() / 1000) + 3600;
+    
+    const signature = crypto
+      .createHmac("sha1", IMAGEKIT_PRIVATE_KEY)
+      .update(token + expire)
+      .digest("hex");
+    
+    functions.logger.log("Generated params:", { token, expire, signature });
+    res.json({ token, expire, signature });
   } catch (e) {
+    functions.logger.error("Auth error:", e);
     res.status(401).json({ error: 'Invalid token' });
   }
 });
