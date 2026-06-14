@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -21,6 +22,7 @@ class _StepAddressState extends State<StepAddress> {
   bool _isLoadingLocation = true;
   bool _isResolvingAddress = false;
   final MapController _mapController = MapController();
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _StepAddressState extends State<StepAddress> {
   @override
   void dispose() {
     _addressController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -60,6 +63,16 @@ class _StepAddressState extends State<StepAddress> {
     }
   }
 
+  void _onMapChanged(LatLng point) {
+    setState(() => _selectedLocation = point);
+
+    // Debounce: wait 1 second after user stops dragging before geocoding
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(seconds: 1), () {
+      _resolveAddress(point);
+    });
+  }
+
   Future<void> _resolveAddress(LatLng location) async {
     setState(() => _isResolvingAddress = true);
     try {
@@ -83,122 +96,135 @@ class _StepAddressState extends State<StepAddress> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    if (_isLoadingLocation) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Stack(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(32, 0, 32, 8),
-          child: Column(
-            children: [
-              Text(
-                'Where do you work?',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w700,
-                  fontSize: 24,
-                  color: AppColors.textPrimary,
-                ),
+        // Full-screen map
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _currentLocation ?? const LatLng(9.082, 8.675),
+            initialZoom: 16.0,
+            onTap: (tapPosition, point) => _onMapChanged(point),
+            onMapEvent: (event) {
+              if (event is MapEventMoveEnd) {
+                final center = _mapController.camera.center;
+                _onMapChanged(center);
+              }
+            },
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.gigscourt',
+            ),
+            if (_selectedLocation != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _selectedLocation!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(
+                      Icons.location_pin,
+                      color: AppColors.primary,
+                      size: 40,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Set your workspace location so clients can find you',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 16,
-                  color: AppColors.textSecondary,
+          ],
+        ),
+
+        // Center pin indicator (always visible, non-interactive)
+        IgnorePointer(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.location_pin,
+                  color: AppColors.primary,
+                  size: 40,
                 ),
-              ),
-            ],
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
 
-        // Map
-        Expanded(
-          child: _isLoadingLocation
-              ? const Center(child: CircularProgressIndicator())
-              : Stack(
-                  children: [
-                    FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCenter: _currentLocation ?? const LatLng(9.082, 8.675),
-                        initialZoom: 5.0,
-                        onTap: (tapPosition, point) {
-                          setState(() => _selectedLocation = point);
-                          _resolveAddress(point);
-                        },
-                      ),
-                      children: [
-                        TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.gigscourt',
-                        ),
-                        if (_selectedLocation != null)
-                          MarkerLayer(
-                            markers: [
-                              Marker(
-                                point: _selectedLocation!,
-                                width: 40,
-                                height: 40,
-                                child: const Icon(
-                                  Icons.location_pin,
-                                  color: AppColors.primary,
-                                  size: 40,
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                    // Center pin indicator when dragging
-                    IgnorePointer(
-                      child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.location_pin,
-                              color: AppColors.primary,
-                              size: 40,
-                            ),
-                            Container(
-                              width: 4,
-                              height: 4,
-                              decoration: const BoxDecoration(
-                                color: AppColors.primary,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+        // Overlaid address card at bottom
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(26),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
                 ),
-        ),
-
-        // Address input
-        Padding(
-          padding: const EdgeInsets.fromLTRB(32, 16, 32, 16),
-          child: TextFormField(
-            controller: _addressController,
-            decoration: InputDecoration(
-              labelText: 'Workspace address',
-              hintText: 'Enter your workspace address',
-              helperText: 'You can edit this address if it\'s not correct.',
-              suffixIcon: _isResolvingAddress
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Where do you work?',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Drag the map to set your workspace',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _addressController,
+                  decoration: InputDecoration(
+                    labelText: 'Workspace address',
+                    hintText: 'Enter your workspace address',
+                    helperText: 'You can edit this address if it\'s not correct.',
+                    suffixIcon: _isResolvingAddress
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

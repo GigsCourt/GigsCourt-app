@@ -24,19 +24,19 @@ class StepHowItWorks extends StatelessWidget {
           _buildInfoCard(
             Icons.visibility_outlined,
             'Visibility',
-            'Your profile appears to clients near you based on your skills and location.',
+            'Your profile appears to clients near you based on your services and location.',
           ),
           const SizedBox(height: 16),
           _buildInfoCard(
             Icons.star_outline,
             'Reputation',
-            'As clients engage with you, your reviews and active status grow.',
+            'As clients engage with you, your reviews grow.',
           ),
           const SizedBox(height: 16),
           _buildInfoCard(
             Icons.card_giftcard_outlined,
             'Free Access',
-            'Full visibility at no cost until you reach 20 leads or 5 reviews.',
+            'Full visibility at no cost until you reach 10 leads or 5 reviews.',
           ),
           const SizedBox(height: 16),
           _buildInfoCard(

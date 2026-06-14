@@ -1,30 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../theme/app_theme.dart';
-import '../../data/skills_data.dart';
+import '../../data/services_data.dart';
 
-class StepSkills extends StatefulWidget {
-  final Function(List<Map<String, dynamic>>) onSkillsChanged;
+class StepServices extends StatefulWidget {
+  final Function(List<Map<String, dynamic>>) onServicesChanged;
 
-  const StepSkills({super.key, required this.onSkillsChanged});
+  const StepServices({super.key, required this.onServicesChanged});
 
   @override
-  State<StepSkills> createState() => _StepSkillsState();
+  State<StepServices> createState() => _StepServicesState();
 }
 
-class _StepSkillsState extends State<StepSkills> {
+class _StepServicesState extends State<StepServices> {
   final _searchController = TextEditingController();
   final _supabase = Supabase.instance.client;
-  final List<Map<String, dynamic>> _selectedSkills = [];
-  List<Map<String, dynamic>> _allSkills = [];
-  List<Map<String, dynamic>> _filteredSkills = [];
+  final List<Map<String, dynamic>> _selectedServices = [];
+  List<Map<String, dynamic>> _allServices = [];
+  List<Map<String, dynamic>> _filteredServices = [];
   bool _isLoading = true;
   String? _expandedCategory;
 
   @override
   void initState() {
     super.initState();
-    _loadSkills();
+    _loadServices();
   }
 
   @override
@@ -33,11 +33,11 @@ class _StepSkillsState extends State<StepSkills> {
     super.dispose();
   }
 
-  Future<void> _loadSkills() async {
+  Future<void> _loadServices() async {
     try {
-      final data = await _supabase.rpc('get_all_skills');
+      final data = await _supabase.rpc('get_all_services');
       setState(() {
-        _allSkills = List<Map<String, dynamic>>.from(data);
+        _allServices = List<Map<String, dynamic>>.from(data);
         _isLoading = false;
       });
     } catch (e) {
@@ -45,33 +45,33 @@ class _StepSkillsState extends State<StepSkills> {
     }
   }
 
-  void _filterSkills(String query) {
+  void _filterServices(String query) {
     setState(() {
       if (query.isEmpty) {
-        _filteredSkills = [];
+        _filteredServices = [];
       } else {
-        _filteredSkills = _allSkills
-            .where((skill) =>
-                skill['name'].toString().toLowerCase().contains(query.toLowerCase()))
+        _filteredServices = _allServices
+            .where((service) =>
+                service['name'].toString().toLowerCase().contains(query.toLowerCase()))
             .toList();
       }
     });
   }
 
-  void _toggleSkill(Map<String, dynamic> skill) {
+  void _toggleService(Map<String, dynamic> service) {
     setState(() {
-      final index = _selectedSkills.indexWhere((s) => s['id'] == skill['id']);
+      final index = _selectedServices.indexWhere((s) => s['id'] == service['id']);
       if (index >= 0) {
-        _selectedSkills.removeAt(index);
+        _selectedServices.removeAt(index);
       } else {
-        _selectedSkills.add(skill);
+        _selectedServices.add(service);
       }
-      widget.onSkillsChanged(_selectedSkills);
+      widget.onServicesChanged(_selectedServices);
     });
   }
 
-  bool _isSelected(int skillId) {
-    return _selectedSkills.any((s) => s['id'] == skillId);
+  bool _isSelected(int serviceId) {
+    return _selectedServices.any((s) => s['id'] == serviceId);
   }
 
   @override
@@ -84,7 +84,7 @@ class _StepSkillsState extends State<StepSkills> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'What skills do you offer?',
+                'What services do you offer?',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w700,
@@ -94,7 +94,7 @@ class _StepSkillsState extends State<StepSkills> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Select at least one skill',
+                'Select at least one service',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 16,
@@ -102,12 +102,11 @@ class _StepSkillsState extends State<StepSkills> {
                 ),
               ),
               const SizedBox(height: 20),
-              // Search bar
               TextField(
                 controller: _searchController,
-                onChanged: _filterSkills,
+                onChanged: _filterServices,
                 decoration: InputDecoration(
-                  hintText: 'Search skills...',
+                  hintText: 'Search services...',
                   prefixIcon: const Icon(Icons.search),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -121,7 +120,6 @@ class _StepSkillsState extends State<StepSkills> {
 
         const SizedBox(height: 16),
 
-        // Skills list
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -130,8 +128,7 @@ class _StepSkillsState extends State<StepSkills> {
                   : _buildCategoryList(),
         ),
 
-        // Selected skills
-        if (_selectedSkills.isNotEmpty) _buildSelectedSkills(),
+        if (_selectedServices.isNotEmpty) _buildSelectedServices(),
       ],
     );
   }
@@ -139,14 +136,14 @@ class _StepSkillsState extends State<StepSkills> {
   Widget _buildSearchResults() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32),
-      itemCount: _filteredSkills.length,
+      itemCount: _filteredServices.length,
       itemBuilder: (context, index) {
-        final skill = _filteredSkills[index];
-        final selected = _isSelected(skill['id']);
+        final service = _filteredServices[index];
+        final selected = _isSelected(service['id']);
         return CheckboxListTile(
           value: selected,
           title: Text(
-            skill['name'],
+            service['name'],
             style: TextStyle(
               fontFamily: 'Inter',
               fontWeight: FontWeight.w500,
@@ -154,14 +151,14 @@ class _StepSkillsState extends State<StepSkills> {
             ),
           ),
           subtitle: Text(
-            skill['category'],
+            service['category'],
             style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 12,
               color: AppColors.textSecondary,
             ),
           ),
-          onChanged: (_) => _toggleSkill(skill),
+          onChanged: (_) => _toggleService(service),
         );
       },
     );
@@ -170,11 +167,11 @@ class _StepSkillsState extends State<StepSkills> {
   Widget _buildCategoryList() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32),
-      itemCount: SkillsData.categories.length,
+      itemCount: ServicesData.categories.length,
       itemBuilder: (context, index) {
-        final category = SkillsData.categories[index];
+        final category = ServicesData.categories[index];
         final isExpanded = _expandedCategory == category['name'];
-        final categorySkills = _allSkills
+        final categoryServices = _allServices
             .where((s) => s['category'] == category['name'])
             .toList();
 
@@ -203,16 +200,16 @@ class _StepSkillsState extends State<StepSkills> {
               },
             ),
             if (isExpanded)
-              ...categorySkills.map((skill) => CheckboxListTile(
-                    value: _isSelected(skill['id']),
+              ...categoryServices.map((service) => CheckboxListTile(
+                    value: _isSelected(service['id']),
                     title: Text(
-                      skill['name'],
+                      service['name'],
                       style: TextStyle(
                         fontFamily: 'Inter',
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    onChanged: (_) => _toggleSkill(skill),
+                    onChanged: (_) => _toggleService(service),
                   )),
             const Divider(),
           ],
@@ -221,7 +218,7 @@ class _StepSkillsState extends State<StepSkills> {
     );
   }
 
-  Widget _buildSelectedSkills() {
+  Widget _buildSelectedServices() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -236,7 +233,7 @@ class _StepSkillsState extends State<StepSkills> {
           Row(
             children: [
               Text(
-                'Selected (${_selectedSkills.length})',
+                'Selected (${_selectedServices.length})',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w600,
@@ -248,8 +245,8 @@ class _StepSkillsState extends State<StepSkills> {
               GestureDetector(
                 onTap: () {
                   setState(() {
-                    _selectedSkills.clear();
-                    widget.onSkillsChanged(_selectedSkills);
+                    _selectedServices.clear();
+                    widget.onServicesChanged(_selectedServices);
                   });
                 },
                 child: Text(
@@ -269,17 +266,17 @@ class _StepSkillsState extends State<StepSkills> {
             height: 40,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: _selectedSkills.length,
+              itemCount: _selectedServices.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
-                final skill = _selectedSkills[index];
+                final service = _selectedServices[index];
                 return Chip(
                   label: Text(
-                    skill['name'],
+                    service['name'],
                     style: const TextStyle(fontFamily: 'Inter', fontSize: 13),
                   ),
                   deleteIcon: const Icon(Icons.close, size: 16),
-                  onDeleted: () => _toggleSkill(skill),
+                  onDeleted: () => _toggleService(service),
                   backgroundColor: AppColors.primary.withAlpha(20),
                   side: BorderSide.none,
                 );

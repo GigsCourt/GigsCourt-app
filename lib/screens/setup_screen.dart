@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 import 'setup/step_photo.dart';
 import 'setup/step_personal_info.dart';
 import 'setup/step_address.dart';
-import 'setup/step_skills.dart';
+import 'setup/step_services.dart';
 import 'setup/step_how_it_works.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,7 +28,7 @@ class _SetupScreenState extends State<SetupScreen> {
   String _bio = '';
   LatLng? _location;
   String _address = '';
-  List<Map<String, dynamic>> _selectedSkills = [];
+  List<Map<String, dynamic>> _selectedServices = [];
   bool _isSaving = false;
 
   // Validation
@@ -41,7 +41,7 @@ class _SetupScreenState extends State<SetupScreen> {
       case 2:
         return _location != null && _address.trim().isNotEmpty;
       case 3:
-        return _selectedSkills.isNotEmpty;
+        return _selectedServices.isNotEmpty;
       case 4:
         return true;
       default:
@@ -88,7 +88,7 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser!;
 
-      // Save to Firestore
+      // Save to Firestore - users collection
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'displayName': _name,
         'bio': _bio,
@@ -98,20 +98,31 @@ class _SetupScreenState extends State<SetupScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Save location to Supabase
-      await Supabase.instance.client.from('provider_locations').upsert({
-        'user_id': user.uid,
-        'latitude': _location!.latitude,
-        'longitude': _location!.longitude,
-        'address': _address,
-        'updated_at': DateTime.now().toIso8601String(),
+      // Save to Firestore - providers collection
+      await FirebaseFirestore.instance.collection('providers').doc(user.uid).set({
+        'services': _selectedServices.map((s) => s['id']).toList(),
+        'workPhotos': [],
+        'subscriptionStatus': 'free',
+        'leadCount': 0,
+        'reviewCount': 0,
+        'averageRating': 0.0,
+        'lastReviewedAt': null,
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Save skills to Supabase
-      for (final skill in _selectedSkills) {
-        await Supabase.instance.client.rpc('add_user_skill', params: {
+      // Save location to Supabase with proper PostGIS geography point
+      await Supabase.instance.client.rpc('upsert_provider_location', params: {
+        'p_user_id': user.uid,
+        'p_latitude': _location!.latitude,
+        'p_longitude': _location!.longitude,
+        'p_address': _address,
+      });
+
+      // Save services to Supabase
+      for (final service in _selectedServices) {
+        await Supabase.instance.client.rpc('add_user_service', params: {
           'p_user_id': user.uid,
-          'p_skill_id': skill['id'],
+          'p_service_id': service['id'],
         });
       }
 
@@ -207,10 +218,10 @@ class _SetupScreenState extends State<SetupScreen> {
                       });
                     },
                   ),
-                  StepSkills(
-                    onSkillsChanged: (skills) {
+                  StepServices(
+                    onServicesChanged: (services) {
                       setState(() {
-                        _selectedSkills = skills;
+                        _selectedServices = services;
                       });
                     },
                   ),
