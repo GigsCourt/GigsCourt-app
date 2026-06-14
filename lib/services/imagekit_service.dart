@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 
 class ImageKitService {
@@ -9,16 +8,31 @@ class ImageKitService {
 
   static Future<String?> uploadImage(File imageFile, String fileName) async {
     try {
-      debugPrint('ImageKit: Step 1 - Calling Cloud Function...');
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('getImageKitToken');
-      final result = await callable.call();
-      debugPrint('ImageKit: Step 1 - Success. Data: ${result.data}');
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
 
-      final token = result.data['token'];
-      final expire = result.data['expire'];
-      final signature = result.data['signature'];
-      debugPrint('ImageKit: Step 2 - Got token=$token, expire=$expire, signature=$signature');
+      final idToken = await user.getIdToken();
+
+      final functionUrl =
+          'https://us-central1-gigs-court.cloudfunctions.net/getImageKitToken';
+
+      final tokenResponse = await http.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+      );
+
+      if (tokenResponse.statusCode != 200) {
+        return null;
+      }
+
+      final tokenData = jsonDecode(tokenResponse.body);
+
+      final token = tokenData['token'];
+      final expire = tokenData['expire'];
+      final signature = tokenData['signature'];
 
       final uri = Uri.parse('https://upload.imagekit.io/api/v1/files/upload');
 
@@ -33,22 +47,15 @@ class ImageKitService {
           await http.MultipartFile.fromPath('file', imageFile.path),
         );
 
-      debugPrint('ImageKit: Step 3 - Uploading to ImageKit...');
       final uploadResponse =
           await http.Response.fromStream(await request.send());
 
-      debugPrint('ImageKit: Step 4 - Response status: ${uploadResponse.statusCode}');
-      debugPrint('ImageKit: Step 4 - Response body: ${uploadResponse.body}');
-
       if (uploadResponse.statusCode == 200) {
         final data = jsonDecode(uploadResponse.body);
-        debugPrint('ImageKit: Step 5 - Success! URL: ${data['url']}');
         return data['url'] as String;
       }
-      debugPrint('ImageKit: FAILED - Status code: ${uploadResponse.statusCode}');
       return null;
     } catch (e) {
-      debugPrint('ImageKit: ERROR - $e');
       return null;
     }
   }
