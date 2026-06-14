@@ -50,6 +50,17 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
+    // Validate session is still valid on server
+    try {
+      await user.getIdToken(true);
+    } catch (e) {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/wizard');
+      }
+      return;
+    }
+
     if (!user.emailVerified) {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/verify-email');
