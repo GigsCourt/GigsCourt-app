@@ -55,7 +55,13 @@ class _SetupScreenState extends State<SetupScreen> {
     super.dispose();
   }
 
+  void _dismissKeyboard() {
+    FocusScope.of(context).unfocus();
+  }
+
   void _goToNextStep() {
+    _dismissKeyboard();
+    
     if (!_canProceedFromCurrentStep) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete this step before continuing.')),
@@ -74,6 +80,7 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   void _goToPreviousStep() {
+    _dismissKeyboard();
     if (_currentStep > 0) {
       _pageController.previousPage(
         duration: const Duration(milliseconds: 300),
@@ -88,7 +95,6 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser!;
 
-      // Save to Firestore - users collection
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'displayName': _name,
         'bio': _bio,
@@ -98,7 +104,6 @@ class _SetupScreenState extends State<SetupScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Save to Firestore - providers collection
       await FirebaseFirestore.instance.collection('providers').doc(user.uid).set({
         'services': _selectedServices.map((s) => s['id']).toList(),
         'workPhotos': [],
@@ -110,7 +115,6 @@ class _SetupScreenState extends State<SetupScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Save location to Supabase with proper PostGIS geography point
       await Supabase.instance.client.rpc('upsert_provider_location', params: {
         'p_user_id': user.uid,
         'p_latitude': _location!.latitude,
@@ -118,7 +122,6 @@ class _SetupScreenState extends State<SetupScreen> {
         'p_address': _address,
       });
 
-      // Save services to Supabase
       for (final service in _selectedServices) {
         await Supabase.instance.client.rpc('add_user_service', params: {
           'p_user_id': user.uid,
@@ -144,131 +147,135 @@ class _SetupScreenState extends State<SetupScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            // Progress bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      if (_currentStep > 0)
-                        GestureDetector(
-                          onTap: _goToPreviousStep,
-                          child: Icon(Icons.arrow_back,
-                              color: AppColors.textPrimary, size: 24),
-                        ),
-                      const Spacer(),
-                      Text(
-                        'Step ${_currentStep + 1} of $_totalSteps',
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: (_currentStep + 1) / _totalSteps,
-                      backgroundColor: AppColors.primary.withAlpha(26),
-                      color: AppColors.primary,
-                      minHeight: 4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Steps
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (index) {
-                  setState(() => _currentStep = index);
-                },
-                children: [
-                  StepPhoto(
-                    onPhotoUploaded: (url) {
-                      setState(() {
-                        _photoUrl = url;
-                      });
-                    },
-                  ),
-                  StepPersonalInfo(
-                    onInfoChanged: (name, bio) {
-                      setState(() {
-                        _name = name;
-                        _bio = bio;
-                      });
-                    },
-                  ),
-                  StepAddress(
-                    onAddressChanged: (location, address) {
-                      setState(() {
-                        _location = location;
-                        _address = address;
-                      });
-                    },
-                  ),
-                  StepServices(
-                    onServicesChanged: (services) {
-                      setState(() {
-                        _selectedServices = services;
-                      });
-                    },
-                  ),
-                  const StepHowItWorks(),
-                ],
-              ),
-            ),
-
-            // Bottom button
-            Padding(
-              padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
-              child: SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isSaving ? null : _goToNextStep,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    elevation: 0,
-                  ),
-                  child: _isSaving
-                      ? const SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
+        child: GestureDetector(
+          onTap: _dismissKeyboard,
+          child: Column(
+            children: [
+              // Progress bar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (_currentStep > 0)
+                          GestureDetector(
+                            onTap: _goToPreviousStep,
+                            child: Icon(Icons.arrow_back,
+                                color: AppColors.textPrimary, size: 24),
                           ),
-                        )
-                      : Text(
-                          _currentStep == _totalSteps - 1
-                              ? 'Get Started'
-                              : 'Continue',
-                          style: const TextStyle(
+                        const Spacer(),
+                        Text(
+                          'Step ${_currentStep + 1} of $_totalSteps',
+                          style: TextStyle(
                             fontFamily: 'Inter',
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
                           ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: (_currentStep + 1) / _totalSteps,
+                        backgroundColor: AppColors.primary.withAlpha(26),
+                        color: AppColors.primary,
+                        minHeight: 4,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+
+              // Steps
+              Expanded(
+                child: PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  onPageChanged: (index) {
+                    _dismissKeyboard();
+                    setState(() => _currentStep = index);
+                  },
+                  children: [
+                    StepPhoto(
+                      onPhotoUploaded: (url) {
+                        setState(() {
+                          _photoUrl = url;
+                        });
+                      },
+                    ),
+                    StepPersonalInfo(
+                      onInfoChanged: (name, bio) {
+                        setState(() {
+                          _name = name;
+                          _bio = bio;
+                        });
+                      },
+                    ),
+                    StepAddress(
+                      onAddressChanged: (location, address) {
+                        setState(() {
+                          _location = location;
+                          _address = address;
+                        });
+                      },
+                    ),
+                    StepServices(
+                      onServicesChanged: (services) {
+                        setState(() {
+                          _selectedServices = services;
+                        });
+                      },
+                    ),
+                    const StepHowItWorks(),
+                  ],
+                ),
+              ),
+
+              // Bottom button
+              Padding(
+                padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _isSaving ? null : _goToNextStep,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _isSaving
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(
+                            _currentStep == _totalSteps - 1
+                                ? 'Get Started'
+                                : 'Continue',
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

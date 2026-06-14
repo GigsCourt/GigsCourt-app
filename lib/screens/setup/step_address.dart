@@ -56,7 +56,7 @@ class _StepAddressState extends State<StepAddress> {
         _selectedLocation = _currentLocation;
         _isLoadingLocation = false;
       });
-      _mapController.move(_currentLocation!, 16);
+      _mapController.move(_currentLocation!, 14);
       _resolveAddress(_currentLocation!);
     } catch (e) {
       setState(() => _isLoadingLocation = false);
@@ -66,7 +66,6 @@ class _StepAddressState extends State<StepAddress> {
   void _onMapChanged(LatLng point) {
     setState(() => _selectedLocation = point);
 
-    // Debounce: wait 1 second after user stops dragging before geocoding
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(seconds: 1), () {
       _resolveAddress(point);
@@ -102,12 +101,11 @@ class _StepAddressState extends State<StepAddress> {
 
     return Stack(
       children: [
-        // Full-screen map
         FlutterMap(
           mapController: _mapController,
           options: MapOptions(
             initialCenter: _currentLocation ?? const LatLng(9.082, 8.675),
-            initialZoom: 16.0,
+            initialZoom: 14.0,
             onTap: (tapPosition, point) => _onMapChanged(point),
             onMapEvent: (event) {
               if (event is MapEventMoveEnd) {
@@ -139,7 +137,6 @@ class _StepAddressState extends State<StepAddress> {
           ],
         ),
 
-        // Center pin indicator (always visible, non-interactive)
         IgnorePointer(
           child: Center(
             child: Column(
@@ -163,52 +160,54 @@ class _StepAddressState extends State<StepAddress> {
           ),
         ),
 
-        // Overlaid address card at bottom
+        // Smaller overlay at bottom
         Positioned(
           left: 16,
           right: 16,
           bottom: 16,
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(26),
-                  blurRadius: 10,
+                  color: Colors.black.withAlpha(20),
+                  blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Where do you work?',
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w700,
-                    fontSize: 18,
+                    fontSize: 16,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   'Drag the map to set your workspace',
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 14,
+                    fontSize: 12,
                     color: AppColors.textSecondary,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 TextFormField(
                   controller: _addressController,
                   decoration: InputDecoration(
                     labelText: 'Workspace address',
                     hintText: 'Enter your workspace address',
-                    helperText: 'You can edit this address if it\'s not correct.',
+                    helperText: 'You can edit if incorrect',
+                    helperMaxLines: 1,
                     suffixIcon: _isResolvingAddress
                         ? const SizedBox(
                             width: 20,
@@ -220,8 +219,9 @@ class _StepAddressState extends State<StepAddress> {
                           )
                         : null,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                 ),
               ],
