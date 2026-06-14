@@ -17,6 +17,7 @@ class _StepPhotoState extends State<StepPhoto> {
   File? _selectedPhoto;
   bool _isUploading = false;
   String? _uploadedUrl;
+  String? _errorMessage;
 
   Future<void> _pickAndUpload() async {
     final picker = ImagePicker();
@@ -30,6 +31,7 @@ class _StepPhotoState extends State<StepPhoto> {
     setState(() {
       _selectedPhoto = File(picked.path);
       _isUploading = true;
+      _errorMessage = null;
     });
 
     final url = await ImageKitService.uploadImage(
@@ -40,7 +42,12 @@ class _StepPhotoState extends State<StepPhoto> {
     if (mounted) {
       setState(() {
         _isUploading = false;
-        _uploadedUrl = url;
+        if (url != null) {
+          _uploadedUrl = url;
+          _errorMessage = null;
+        } else {
+          _errorMessage = 'Upload failed. Check your connection and try again.';
+        }
       });
       widget.onPhotoUploaded(url);
     }
@@ -81,11 +88,15 @@ class _StepPhotoState extends State<StepPhoto> {
                 height: 160,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.primary.withAlpha(20),
+                  color: _errorMessage != null
+                      ? AppColors.error.withAlpha(20)
+                      : AppColors.primary.withAlpha(20),
                   border: Border.all(
                     color: _uploadedUrl != null
                         ? AppColors.success
-                        : AppColors.primary.withAlpha(51),
+                        : _errorMessage != null
+                            ? AppColors.error
+                            : AppColors.primary.withAlpha(51),
                     width: _uploadedUrl != null ? 3 : 2,
                   ),
                   image: _selectedPhoto != null
@@ -99,11 +110,13 @@ class _StepPhotoState extends State<StepPhoto> {
                     ? const CircularProgressIndicator(color: AppColors.primary)
                     : _uploadedUrl != null
                         ? const Icon(Icons.check, color: AppColors.success, size: 48)
-                        : const Icon(
-                            Icons.camera_alt_outlined,
-                            size: 48,
-                            color: AppColors.primary,
-                          ),
+                        : _errorMessage != null
+                            ? const Icon(Icons.error_outline, color: AppColors.error, size: 48)
+                            : const Icon(
+                                Icons.camera_alt_outlined,
+                                size: 48,
+                                color: AppColors.primary,
+                              ),
               ),
             ),
             if (_uploadedUrl != null) ...[
@@ -113,6 +126,18 @@ class _StepPhotoState extends State<StepPhoto> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   color: AppColors.success,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  color: AppColors.error,
                   fontSize: 14,
                 ),
               ),
