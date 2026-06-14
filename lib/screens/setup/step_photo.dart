@@ -34,7 +34,7 @@ class _StepPhotoState extends State<StepPhoto> {
       _errorMessage = null;
     });
 
-    final url = await ImageKitService.uploadImage(
+    final result = await ImageKitService.uploadImage(
       _selectedPhoto!,
       'profile_${DateTime.now().millisecondsSinceEpoch}',
     );
@@ -42,14 +42,14 @@ class _StepPhotoState extends State<StepPhoto> {
     if (mounted) {
       setState(() {
         _isUploading = false;
-        if (url != null) {
-          _uploadedUrl = url;
+        if (result['success'] == true) {
+          _uploadedUrl = result['url'];
           _errorMessage = null;
         } else {
-          _errorMessage = 'Upload failed. Check your connection and try again.';
+          _errorMessage = result['error'] ?? 'Upload failed';
         }
       });
-      widget.onPhotoUploaded(url);
+      widget.onPhotoUploaded(_uploadedUrl);
     }
   }
 

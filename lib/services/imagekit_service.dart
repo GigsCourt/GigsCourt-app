@@ -6,10 +6,12 @@ import 'package:http/http.dart' as http;
 class ImageKitService {
   static const _publicKey = 'public_YDOcWLpiiHDlpU+y4GXqUjVDEaQ=';
 
-  static Future<String?> uploadImage(File imageFile, String fileName) async {
+  static Future<Map<String, dynamic>> uploadImage(File imageFile, String fileName) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return null;
+      if (user == null) {
+        return {'success': false, 'error': 'Not logged in'};
+      }
 
       final idToken = await user.getIdToken();
 
@@ -25,7 +27,7 @@ class ImageKitService {
       );
 
       if (tokenResponse.statusCode != 200) {
-        return null;
+        return {'success': false, 'error': 'Cloud Function failed: ${tokenResponse.statusCode}'};
       }
 
       final tokenData = jsonDecode(tokenResponse.body);
@@ -33,6 +35,10 @@ class ImageKitService {
       final token = tokenData['token'];
       final expire = tokenData['expire'];
       final signature = tokenData['signature'];
+
+      if (token == null || expire == null || signature == null) {
+        return {'success': false, 'error': 'Missing token params from Cloud Function'};
+      }
 
       final uri = Uri.parse('https://upload.imagekit.io/api/v1/files/upload');
 
@@ -52,11 +58,12 @@ class ImageKitService {
 
       if (uploadResponse.statusCode == 200) {
         final data = jsonDecode(uploadResponse.body);
-        return data['url'] as String;
+        return {'success': true, 'url': data['url']};
       }
-      return null;
+
+      return {'success': false, 'error': 'ImageKit upload failed: ${uploadResponse.statusCode} ${uploadResponse.body}'};
     } catch (e) {
-      return null;
+      return {'success': false, 'error': e.toString()};
     }
   }
 }
