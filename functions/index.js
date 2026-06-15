@@ -4,7 +4,7 @@ const crypto = require("crypto");
 
 admin.initializeApp();
 
-const IMAGEKIT_PRIVATE_KEY = "private_g6D6+rm4r4+Rh1PqoEDuD+zSmjI=";
+const IMAGEKIT_PRIVATE_KEY = process.env.IMAGEKIT_PRIVATE_KEY;
 const IMAGEKIT_PUBLIC_KEY = "public_YDOcWLpiiHDlpU+y4GXqUjVDEaQ=";
 
 exports.getImageKitToken = functions.https.onRequest(async (req, res) => {
@@ -36,10 +36,8 @@ exports.getImageKitToken = functions.https.onRequest(async (req, res) => {
       .update(token + expire)
       .digest("hex");
     
-    functions.logger.log("Generated params:", { token, expire, signature });
     res.json({ token, expire, signature });
   } catch (e) {
-    functions.logger.error("Auth error:", e);
     res.status(401).json({ error: 'Invalid token' });
   }
 });
