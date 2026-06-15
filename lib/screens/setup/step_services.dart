@@ -123,9 +123,23 @@ class _StepServicesState extends State<StepServices> {
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
-              : _searchController.text.isNotEmpty
-                  ? _buildSearchResults()
-                  : _buildCategoryList(),
+              : _allServices.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Text(
+                          'Unable to load services. Please check your connection and try again.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    )
+                  : _searchController.text.isNotEmpty
+                      ? _buildSearchResults()
+                      : _buildCategoryList(),
         ),
 
         if (_selectedServices.isNotEmpty) _buildSelectedServices(),

@@ -7,18 +7,21 @@ import 'package:geocoding/geocoding.dart';
 import '../../theme/app_theme.dart';
 
 class StepAddress extends StatefulWidget {
+  final TextEditingController addressController;
   final Function(LatLng location, String address) onAddressChanged;
 
-  const StepAddress({super.key, required this.onAddressChanged});
+  const StepAddress({
+    super.key,
+    required this.addressController,
+    required this.onAddressChanged,
+  });
 
   @override
   State<StepAddress> createState() => _StepAddressState();
 }
 
 class _StepAddressState extends State<StepAddress> {
-  final _addressController = TextEditingController();
   LatLng? _currentLocation;
-  LatLng? _selectedLocation;
   bool _isLoadingLocation = true;
   bool _isResolvingAddress = false;
   final MapController _mapController = MapController();
@@ -27,25 +30,31 @@ class _StepAddressState extends State<StepAddress> {
   @override
   void initState() {
     super.initState();
-    _addressController.addListener(_notifyParent);
     _getCurrentLocation();
   }
 
   @override
   void dispose() {
-    _addressController.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
 
-  void _notifyParent() {
-    if (_selectedLocation != null && _addressController.text.isNotEmpty) {
-      widget.onAddressChanged(_selectedLocation!, _addressController.text);
-    }
-  }
-
   Future<void> _getCurrentLocation() async {
     try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() => _isLoadingLocation = false);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => _isLoadingLocation = false);
+        return;
+      }
+
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -53,7 +62,6 @@ class _StepAddressState extends State<StepAddress> {
       );
       setState(() {
         _currentLocation = LatLng(position.latitude, position.longitude);
-        _selectedLocation = _currentLocation;
         _isLoadingLocation = false;
       });
       _mapController.move(_currentLocation!, 14);
@@ -64,7 +72,8 @@ class _StepAddressState extends State<StepAddress> {
   }
 
   void _onMapChanged(LatLng point) {
-    setState(() => _selectedLocation = point);
+    setState(() => _currentLocation = point);
+    widget.onAddressChanged(point, widget.addressController.text);
 
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(seconds: 1), () {
@@ -84,8 +93,8 @@ class _StepAddressState extends State<StepAddress> {
         final address = '${place.street ?? ''}, ${place.locality ?? ''}, ${place.administrativeArea ?? ''}'
             .trim()
             .replaceAll(RegExp(r'^,\s*|,\s*$|,\s*,+'), '');
-        _addressController.text = address;
-        _notifyParent();
+        widget.addressController.text = address;
+        widget.onAddressChanged(location, address);
       }
     } catch (e) {
       // Address resolution failed, user can type manually
@@ -119,21 +128,6 @@ class _StepAddressState extends State<StepAddress> {
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.gigscourt',
             ),
-            if (_selectedLocation != null)
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _selectedLocation!,
-                    width: 40,
-                    height: 40,
-                    child: const Icon(
-                      Icons.location_pin,
-                      color: AppColors.primary,
-                      size: 40,
-                    ),
-                  ),
-                ],
-              ),
           ],
         ),
 
@@ -160,7 +154,6 @@ class _StepAddressState extends State<StepAddress> {
           ),
         ),
 
-        // Smaller overlay at bottom
         Positioned(
           left: 16,
           right: 16,
@@ -202,7 +195,7 @@ class _StepAddressState extends State<StepAddress> {
                 ),
                 const SizedBox(height: 8),
                 TextFormField(
-                  controller: _addressController,
+                  controller: widget.addressController,
                   decoration: InputDecoration(
                     labelText: 'Workspace address',
                     hintText: 'Enter your workspace address',

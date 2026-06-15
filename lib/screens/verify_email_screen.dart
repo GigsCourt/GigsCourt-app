@@ -15,7 +15,6 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   Future<void> _checkEmailVerified() async {
     await FirebaseAuth.instance.currentUser?.reload();
     final isVerified = FirebaseAuth.instance.currentUser?.emailVerified ?? false;
-    debugPrint('Email verified: $isVerified');
 
     if (mounted) {
       if (isVerified) {

@@ -1,39 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 
-class StepPersonalInfo extends StatefulWidget {
-  final Function(String name, String bio) onInfoChanged;
+class StepPersonalInfo extends StatelessWidget {
+  final TextEditingController nameController;
+  final TextEditingController bioController;
 
-  const StepPersonalInfo({super.key, required this.onInfoChanged});
-
-  @override
-  State<StepPersonalInfo> createState() => _StepPersonalInfoState();
-}
-
-class _StepPersonalInfoState extends State<StepPersonalInfo> {
-  final _nameController = TextEditingController();
-  final _bioController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _nameController.addListener(_notifyParent);
-    _bioController.addListener(_notifyParent);
-  }
-
-  void _notifyParent() {
-    widget.onInfoChanged(
-      _nameController.text.trim(),
-      _bioController.text.trim(),
-    );
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _bioController.dispose();
-    super.dispose();
-  }
+  const StepPersonalInfo({
+    super.key,
+    required this.nameController,
+    required this.bioController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +39,7 @@ class _StepPersonalInfoState extends State<StepPersonalInfo> {
           ),
           const SizedBox(height: 32),
           TextFormField(
-            controller: _nameController,
+            controller: nameController,
             textCapitalization: TextCapitalization.words,
             decoration: InputDecoration(
               labelText: 'Display name',
@@ -75,7 +51,7 @@ class _StepPersonalInfoState extends State<StepPersonalInfo> {
           ),
           const SizedBox(height: 20),
           TextFormField(
-            controller: _bioController,
+            controller: bioController,
             maxLines: 3,
             maxLength: 150,
             textCapitalization: TextCapitalization.sentences,

@@ -22,22 +22,34 @@ class _SetupScreenState extends State<SetupScreen> {
   int _currentStep = 0;
   final int _totalSteps = 5;
 
-  // Collected data from each step
   String? _photoUrl;
-  String _name = '';
-  String _bio = '';
+  final _nameController = TextEditingController();
+  final _bioController = TextEditingController();
+  final _addressController = TextEditingController();
   LatLng? _location;
-  String _address = '';
   List<Map<String, dynamic>> _selectedServices = [];
   bool _isSaving = false;
 
-  // Validation
+  @override
+  void initState() {
+    super.initState();
+    _addressController.addListener(_updateAddress);
+  }
+
+  void _updateAddress() {
+    _address = _addressController.text;
+  }
+
+  String get _name => _nameController.text.trim();
+  String get _bio => _bioController.text.trim();
+  String _address = '';
+
   bool get _canProceedFromCurrentStep {
     switch (_currentStep) {
       case 0:
         return _photoUrl != null;
       case 1:
-        return _name.trim().isNotEmpty && _bio.trim().isNotEmpty;
+        return _name.isNotEmpty && _bio.isNotEmpty;
       case 2:
         return _location != null && _address.trim().isNotEmpty;
       case 3:
@@ -52,6 +64,9 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _nameController.dispose();
+    _bioController.dispose();
+    _addressController.dispose();
     super.dispose();
   }
 
@@ -136,7 +151,9 @@ class _SetupScreenState extends State<SetupScreen> {
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Something went wrong: $e')),
+          const SnackBar(
+            content: Text('Unable to save your profile. Please check your connection and try again.'),
+          ),
         );
       }
     }
@@ -151,7 +168,6 @@ class _SetupScreenState extends State<SetupScreen> {
           onTap: _dismissKeyboard,
           child: Column(
             children: [
-              // Progress bar
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                 child: Column(
@@ -191,7 +207,6 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
               ),
 
-              // Steps
               Expanded(
                 child: PageView(
                   controller: _pageController,
@@ -203,24 +218,19 @@ class _SetupScreenState extends State<SetupScreen> {
                   children: [
                     StepPhoto(
                       onPhotoUploaded: (url) {
-                        setState(() {
-                          _photoUrl = url;
-                        });
+                        setState(() => _photoUrl = url);
                       },
+                      existingUrl: _photoUrl,
                     ),
                     StepPersonalInfo(
-                      onInfoChanged: (name, bio) {
-                        setState(() {
-                          _name = name;
-                          _bio = bio;
-                        });
-                      },
+                      nameController: _nameController,
+                      bioController: _bioController,
                     ),
                     StepAddress(
+                      addressController: _addressController,
                       onAddressChanged: (location, address) {
                         setState(() {
                           _location = location;
-                          _address = address;
                         });
                       },
                     ),
@@ -236,7 +246,6 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
               ),
 
-              // Bottom button
               Padding(
                 padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
                 child: SizedBox(

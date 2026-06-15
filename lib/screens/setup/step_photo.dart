@@ -6,8 +6,13 @@ import '../../services/imagekit_service.dart';
 
 class StepPhoto extends StatefulWidget {
   final Function(String?) onPhotoUploaded;
+  final String? existingUrl;
 
-  const StepPhoto({super.key, required this.onPhotoUploaded});
+  const StepPhoto({
+    super.key,
+    required this.onPhotoUploaded,
+    this.existingUrl,
+  });
 
   @override
   State<StepPhoto> createState() => _StepPhotoState();
@@ -18,6 +23,12 @@ class _StepPhotoState extends State<StepPhoto> {
   bool _isUploading = false;
   String? _uploadedUrl;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _uploadedUrl = widget.existingUrl;
+  }
 
   Future<void> _pickAndUpload() async {
     final picker = ImagePicker();
@@ -46,7 +57,22 @@ class _StepPhotoState extends State<StepPhoto> {
           _uploadedUrl = result['url'];
           _errorMessage = null;
         } else {
-          _errorMessage = result['error'] ?? 'Upload failed';
+          final error = result['error'] as String?;
+          if (error != null) {
+            if (error.contains('Not logged in')) {
+              _errorMessage = 'Please log in again to continue.';
+            } else if (error.contains('Cloud Function')) {
+              _errorMessage = 'Service temporarily unavailable. Please try again.';
+            } else if (error.contains('Missing token')) {
+              _errorMessage = 'Upload authorization failed. Please try again.';
+            } else if (error.contains('ImageKit upload')) {
+              _errorMessage = 'Photo upload failed. Please check your connection and try again.';
+            } else {
+              _errorMessage = 'Something went wrong. Please try again.';
+            }
+          } else {
+            _errorMessage = 'Upload failed. Please try again.';
+          }
         }
       });
       widget.onPhotoUploaded(_uploadedUrl);
@@ -104,7 +130,12 @@ class _StepPhotoState extends State<StepPhoto> {
                           image: FileImage(_selectedPhoto!),
                           fit: BoxFit.cover,
                         )
-                      : null,
+                      : _uploadedUrl != null
+                          ? DecorationImage(
+                              image: NetworkImage(_uploadedUrl!),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
                 ),
                 child: _isUploading
                     ? const CircularProgressIndicator(color: AppColors.primary)
