@@ -7,6 +7,7 @@ import 'screens/wizard_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/setup_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/provider_profile_screen.dart';
 import 'theme/app_theme.dart';
 import 'screens/verify_email_screen.dart';
 import 'screens/login_screen.dart';
@@ -44,6 +45,16 @@ class GigsCourtApp extends StatelessWidget {
         '/verify-email': (context) => const VerifyEmailScreen(),
         '/setup': (context) => SetupScreen(),
         '/home': (context) => const HomeScreen(),
+      },
+      onGenerateRoute: (settings) {
+        if (settings.name == '/provider-profile') {
+          final providerId = settings.arguments as String;
+          return MaterialPageRoute(
+            builder: (context) =>
+                ProviderProfileScreen(providerId: providerId),
+          );
+        }
+        return null;
       },
     );
   }
