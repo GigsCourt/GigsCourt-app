@@ -90,7 +90,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final userIds = nearbyUsers.map((p) => p['user_id'] as String).toList();
 
-      // Batch fetch from Cloud Function
       final user = FirebaseAuth.instance.currentUser;
       final idToken = await user!.getIdToken();
 
@@ -112,24 +111,51 @@ class _HomeScreenState extends State<HomeScreen> {
       final data = jsonDecode(response.body);
       final results = data['results'] as Map<String, dynamic>;
 
-      // Combine Supabase location data with Firestore data
-      final providers = nearbyUsers.map((supa) {
+      // Collect all service IDs across all providers
+      final allServiceIds = <int>{};
+      final providersRaw = nearbyUsers.map((supa) {
         final id = supa['user_id'] as String;
         final fireData = results[id] as Map<String, dynamic>?;
         final provider = fireData?['provider'] as Map<String, dynamic>?;
         final userData = fireData?['user'] as Map<String, dynamic>?;
-
+        final serviceIds = (provider?['services'] as List<dynamic>?)
+                ?.map((s) => s as int)
+                .toList() ??
+            [];
+        allServiceIds.addAll(serviceIds);
         return {
           'userId': id,
           'name': userData?['displayName'] ?? 'Unknown',
           'photoUrl': userData?['photoUrl'],
           'isVerified': provider?['subscriptionStatus'] == 'premium',
           'isOnline': provider?['isOnline'] ?? false,
-          'services': _getServiceNames(provider?['services'] ?? []),
+          'serviceIds': serviceIds,
           'rating': (provider?['averageRating'] ?? 0.0).toDouble(),
           'reviewCount': provider?['reviewCount'] ?? 0,
           'distanceKm': (supa['distance_meters'] as num) / 1000.0,
           'lastReviewedAt': provider?['lastReviewedAt'],
+        };
+      }).toList();
+
+      // Fetch service names from Supabase
+      Map<int, String> serviceNames = {};
+      if (allServiceIds.isNotEmpty) {
+        final namesData = await _supabase.rpc('get_service_names', params: {
+          'service_ids': allServiceIds.toList(),
+        });
+        for (final row in List<Map<String, dynamic>>.from(namesData)) {
+          serviceNames[row['id'] as int] = row['name'] as String;
+        }
+      }
+
+      // Combine with service names
+      final providers = providersRaw.map((p) {
+        final names = (p['serviceIds'] as List<int>)
+            .map((id) => serviceNames[id] ?? id.toString())
+            .toList();
+        return {
+          ...p,
+          'services': names,
         };
       }).toList();
 
@@ -164,13 +190,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
     }
-  }
-
-  List<String> _getServiceNames(dynamic services) {
-    if (services is List) {
-      return services.map((s) => s.toString()).toList();
-    }
-    return [];
   }
 
   Future<void> _refresh() async {
