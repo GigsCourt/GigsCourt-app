@@ -5,8 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '../theme/app_theme.dart';
+import '../services/cache_service.dart';
 import '../widgets/provider_card.dart';
+import '../widgets/skeleton_loader.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,9 +20,13 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _supabase = Supabase.instance.client;
+  final _remoteConfig = FirebaseRemoteConfig.instance;
+  final _scrollController = ScrollController();
   List<Map<String, dynamic>> _featuredProviders = [];
   List<Map<String, dynamic>> _allProviders = [];
   bool _isLoading = true;
+  bool _isEarlyAccess = false;
+  bool _showScrollToTop = false;
   double? _userLat;
   double? _userLng;
   StreamSubscription? _locationSubscription;
@@ -27,13 +34,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _getLocationAndLoadProviders();
+    _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
+    _scrollController.addListener(_onScroll);
+    _loadCachedOrFetch();
   }
 
   @override
   void dispose() {
     _locationSubscription?.cancel();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients) {
+      setState(() {
+        _showScrollToTop = _scrollController.offset > 400;
+      });
+    }
+  }
+
+  Future<void> _loadCachedOrFetch() async {
+    final cached = CacheService.get<List<Map<String, dynamic>>>('home_providers');
+    if (cached != null) {
+      setState(() {
+        _allProviders = cached;
+        _featuredProviders = cached.where((p) => p['isVerified'] == true).toList();
+        _isLoading = false;
+      });
+    }
+    await _getLocationAndLoadProviders();
   }
 
   Future<void> _getLocationAndLoadProviders() async {
@@ -85,17 +115,16 @@ class _HomeScreenState extends State<HomeScreen> {
           _allProviders = [];
           _isLoading = false;
         });
+        CacheService.remove('home_providers');
         return;
       }
 
       final userIds = nearbyUsers.map((p) => p['user_id'] as String).toList();
-
       final user = FirebaseAuth.instance.currentUser;
       final idToken = await user!.getIdToken();
 
       final response = await http.post(
-        Uri.parse(
-            'https://us-central1-gigs-court.cloudfunctions.net/getProviderDetails'),
+        Uri.parse('https://us-central1-gigs-court.cloudfunctions.net/getProviderDetails'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
@@ -111,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final data = jsonDecode(response.body);
       final results = data['results'] as Map<String, dynamic>;
 
-      // Collect all service IDs across all providers
       final allServiceIds = <int>{};
       final providersRaw = nearbyUsers.map((supa) {
         final id = supa['user_id'] as String;
@@ -120,14 +148,14 @@ class _HomeScreenState extends State<HomeScreen> {
         final userData = fireData?['user'] as Map<String, dynamic>?;
         final serviceIds = (provider?['services'] as List<dynamic>?)
                 ?.map((s) => s as int)
-                .toList() ??
-            [];
+                .toList() ?? [];
         allServiceIds.addAll(serviceIds);
         return {
           'userId': id,
           'name': userData?['displayName'] ?? 'Unknown',
           'photoUrl': userData?['photoUrl'],
           'isVerified': provider?['subscriptionStatus'] == 'premium',
+          'subscriptionStatus': provider?['subscriptionStatus'] ?? 'free',
           'isOnline': provider?['isOnline'] ?? false,
           'serviceIds': serviceIds,
           'rating': (provider?['averageRating'] ?? 0.0).toDouble(),
@@ -137,7 +165,6 @@ class _HomeScreenState extends State<HomeScreen> {
         };
       }).toList();
 
-      // Fetch service names from Supabase
       Map<int, String> serviceNames = {};
       if (allServiceIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {
@@ -148,42 +175,33 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      // Combine with service names
       final providers = providersRaw.map((p) {
         final names = (p['serviceIds'] as List<int>)
             .map((id) => serviceNames[id] ?? id.toString())
             .toList();
-        return {
-          ...p,
-          'services': names,
-        };
+        return {...p, 'services': names};
       }).toList();
 
-      // Sort: distance → recently reviewed → # reviews → rating
       providers.sort((a, b) {
-        final distCompare = (a['distanceKm'] as double)
-            .compareTo(b['distanceKm'] as double);
+        final distCompare = (a['distanceKm'] as double).compareTo(b['distanceKm'] as double);
         if (distCompare != 0) return distCompare;
-
         final aLast = a['lastReviewedAt'];
         final bLast = b['lastReviewedAt'];
         if (aLast != null && bLast != null) {
           final dateCompare = (bLast as dynamic).compareTo(aLast as dynamic);
           if (dateCompare != 0) return dateCompare;
         }
-
-        final reviewCompare = (b['reviewCount'] as int)
-            .compareTo(a['reviewCount'] as int);
+        final reviewCompare = (b['reviewCount'] as int).compareTo(a['reviewCount'] as int);
         if (reviewCompare != 0) return reviewCompare;
-
         if ((a['rating'] as double) < 3.0) return 1;
         if ((b['rating'] as double) < 3.0) return -1;
         return (b['rating'] as double).compareTo(a['rating'] as double);
       });
 
+      CacheService.set('home_providers', providers, ttl: const Duration(minutes: 2));
+
       setState(() {
-        _featuredProviders =
-            providers.where((p) => p['isVerified'] == true).toList();
+        _featuredProviders = providers.where((p) => p['isVerified'] == true).toList();
         _allProviders = providers;
         _isLoading = false;
       });
@@ -192,8 +210,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _handleProviderTap(Map<String, dynamic> provider) {
+    if (provider['subscriptionStatus'] == 'locked') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This provider is not currently accepting new clients.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } else {
+      Navigator.of(context).pushNamed('/provider-profile', arguments: provider['userId']);
+    }
+  }
+
   Future<void> _refresh() async {
-    setState(() => _isLoading = true);
+    CacheService.remove('home_providers');
     await _loadProviders();
   }
 
@@ -203,123 +234,153 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        title: const Text(
-          'GigsCourt',
-          style: TextStyle(
-            fontFamily: 'Inter',
-            fontWeight: FontWeight.w700,
-            fontSize: 20,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('GigsCourt',
+                style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 20)),
+            if (_isEarlyAccess) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(40),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text('Early Access',
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.white)),
+              ),
+            ],
+          ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              Navigator.of(context).pushNamed('/notifications');
-            },
+            onPressed: () => Navigator.of(context).pushNamed('/notifications'),
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (_featuredProviders.isNotEmpty) ...[
-                    _buildSectionHeader('Featured'),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 110,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _featuredProviders.length,
-                        itemBuilder: (context, index) {
-                          final provider = _featuredProviders[index];
-                          return ProviderCard(
-                            name: provider['name'],
-                            photoUrl: provider['photoUrl'],
-                            isVerified: provider['isVerified'],
-                            isOnline: provider['isOnline'],
-                            services: List<String>.from(provider['services']),
-                            rating: provider['rating'],
-                            reviewCount: provider['reviewCount'],
-                            distanceKm: provider['distanceKm'],
-                            isHorizontal: true,
-                            onTap: () {
-                              Navigator.of(context).pushNamed(
-                                '/provider-profile',
-                                arguments: provider['userId'],
+      body: Stack(
+        children: [
+          _isLoading && _allProviders.isEmpty
+              ? _buildSkeletonGrid()
+              : RefreshIndicator(
+                  onRefresh: _refresh,
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_featuredProviders.isNotEmpty) ...[
+                        _buildSectionHeader('Featured'),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 110,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _featuredProviders.length,
+                            itemBuilder: (context, index) {
+                              final p = _featuredProviders[index];
+                              return ProviderCard(
+                                name: p['name'],
+                                photoUrl: p['photoUrl'],
+                                isVerified: p['isVerified'],
+                                isOnline: p['isOnline'],
+                                services: List<String>.from(p['services']),
+                                rating: p['rating'],
+                                reviewCount: p['reviewCount'],
+                                distanceKm: p['distanceKm'],
+                                isHorizontal: true,
+                                onTap: () => _handleProviderTap(p),
                               );
                             },
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                  _buildSectionHeader('All Providers'),
-                  const SizedBox(height: 12),
-                  if (_allProviders.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Text(
-                        'No providers found nearby.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: AppColors.textSecondary,
+                          ),
                         ),
-                      ),
-                    )
-                  else
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        childAspectRatio: 0.72,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                      ),
-                      itemCount: _allProviders.length,
-                      itemBuilder: (context, index) {
-                        final provider = _allProviders[index];
-                        return ProviderCard(
-                          name: provider['name'],
-                          photoUrl: provider['photoUrl'],
-                          isVerified: provider['isVerified'],
-                          isOnline: provider['isOnline'],
-                          services: List<String>.from(provider['services']),
-                          rating: provider['rating'],
-                          reviewCount: provider['reviewCount'],
-                          distanceKm: provider['distanceKm'],
-                          onTap: () {
-                            Navigator.of(context).pushNamed(
-                              '/provider-profile',
-                              arguments: provider['userId'],
+                        const SizedBox(height: 24),
+                      ],
+                      _buildSectionHeader('All Providers'),
+                      const SizedBox(height: 12),
+                      if (_allProviders.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Text('No providers found nearby.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
+                        )
+                      else
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
+                          itemCount: _allProviders.length,
+                          itemBuilder: (context, index) {
+                            final p = _allProviders[index];
+                            return ProviderCard(
+                              name: p['name'],
+                              photoUrl: p['photoUrl'],
+                              isVerified: p['isVerified'],
+                              isOnline: p['isOnline'],
+                              services: List<String>.from(p['services']),
+                              rating: p['rating'],
+                              reviewCount: p['reviewCount'],
+                              distanceKm: p['distanceKm'],
+                              onTap: () => _handleProviderTap(p),
                             );
                           },
-                        );
-                      },
-                    ),
-                ],
+                        ),
+                    ],
+                  ),
+                ),
+          if (_showScrollToTop)
+            Positioned(
+              bottom: 20,
+              right: 20,
+              child: FloatingActionButton.small(
+                onPressed: () {
+                  _scrollController.animateTo(0,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut);
+                },
+                backgroundColor: AppColors.primary,
+                child: const Icon(Icons.keyboard_arrow_up, color: Colors.white),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkeletonGrid() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const SkeletonLoader(width: 100, height: 18),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 110,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: 3,
+            itemBuilder: (_, _) => const ProviderCardSkeleton(isHorizontal: true),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const SkeletonLoader(width: 120, height: 18),
+        const SizedBox(height: 12),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
+          itemCount: 6,
+          itemBuilder: (_, _) => const ProviderCardSkeleton(),
+        ),
+      ],
     );
   }
 
   Widget _buildSectionHeader(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontFamily: 'Inter',
-        fontWeight: FontWeight.w700,
-        fontSize: 18,
-        color: AppColors.textPrimary,
-      ),
-    );
+    return Text(title,
+        style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.textPrimary));
   }
 }

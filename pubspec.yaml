@@ -24,6 +24,9 @@ dependencies:
   latlong2: ^0.9.1
   http: ^1.6.0
   cloud_functions: ^6.3.2
+  url_launcher: ^6.3.2
+  firebase_remote_config: ^6.5.2
+  webview_flutter: ^4.14.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

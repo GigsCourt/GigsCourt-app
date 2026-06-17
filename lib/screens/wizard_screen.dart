@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '../theme/app_theme.dart';
 
 class WizardScreen extends StatefulWidget {
@@ -12,6 +13,7 @@ class WizardScreen extends StatefulWidget {
 class _WizardScreenState extends State<WizardScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
+  bool _isEarlyAccess = false;
 
   final List<WizardSlide> _slides = [
     WizardSlide(
@@ -33,6 +35,12 @@ class _WizardScreenState extends State<WizardScreen> {
           "You\u2019re not just a client. List your skills, build your reputation, and earn. Your service, your court.",
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _isEarlyAccess = !FirebaseRemoteConfig.instance.getBool('subscriptions_enforced');
+  }
 
   void _goToNextPage() {
     if (_currentPage < _slides.length - 1) {
@@ -111,6 +119,20 @@ class _WizardScreenState extends State<WizardScreen> {
                 }),
               ),
             ),
+            if (_isEarlyAccess)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Free during Early Access',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 13,
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
               child: SizedBox(
