@@ -63,9 +63,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     }
-    await _getLocationAndLoadProviders();
+    
+    // Timeout after 10 seconds
+    try {
+      await _getLocationAndLoadProviders().timeout(const Duration(seconds: 10));
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
-
+  
   Future<void> _getLocationAndLoadProviders() async {
     try {
       final permission = await Geolocator.checkPermission();
