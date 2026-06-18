@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../services/cache_service.dart';
 import '../widgets/provider_card.dart';
 import '../widgets/skeleton_loader.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -232,7 +233,8 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
-    if (provider['subscriptionStatus'] == 'locked') {
+    final isEarlyAccess = !FirebaseRemoteConfig.instance.getBool('subscriptions_enforced');
+    if (!isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('This provider is not currently accepting new clients.'),

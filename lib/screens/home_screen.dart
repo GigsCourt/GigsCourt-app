@@ -71,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _isLoading = false);
     }
   }
-  
+
   Future<void> _getLocationAndLoadProviders() async {
     try {
       final permission = await Geolocator.checkPermission();
@@ -220,7 +220,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
-    if (provider['subscriptionStatus'] == 'locked') {
+    debugPrint('isEarlyAccess: $_isEarlyAccess, status: ${provider['subscriptionStatus']}');
+    if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('This provider is not currently accepting new clients.'),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -36,68 +37,72 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
 
   Future<void> _loadProfile() async {
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.providerId)
-          .get();
+      final userDocFuture = FirebaseFirestore.instance.collection('users').doc(widget.providerId).get();
+      final providerDocFuture = FirebaseFirestore.instance.collection('providers').doc(widget.providerId).get();
+      final followingDocFuture = _currentUser != null
+          ? FirebaseFirestore.instance.collection('users').doc(_currentUser.uid).get()
+          : Future.value(null);
+      final distanceFuture = _getDistanceIfPossible();
 
-      final providerDoc = await FirebaseFirestore.instance
-          .collection('providers')
-          .doc(widget.providerId)
-          .get();
+      final userDoc = await userDocFuture;
+      final providerDoc = await providerDocFuture;
+      final followingDoc = await followingDocFuture;
+      await distanceFuture;
 
       if (!userDoc.exists) {
         setState(() => _isLoading = false);
         return;
       }
 
-      setState(() {
-        _userData = userDoc.data();
-        _providerData = providerDoc.data();
-        _workPhotos = List<String>.from(_providerData?['workPhotos'] ?? []);
-      });
+      final userData = userDoc.data();
+      final providerData = providerDoc.data();
 
-      final serviceIds = List<int>.from(_providerData?['services'] ?? []);
+      List<Map<String, dynamic>> services = [];
+      final serviceIds = List<int>.from(providerData?['services'] ?? []);
       if (serviceIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {
           'service_ids': serviceIds,
         });
-        _services = List<Map<String, dynamic>>.from(namesData);
+        services = List<Map<String, dynamic>>.from(namesData);
       }
 
-      // Check if current user is following
-      if (_currentUser != null) {
-        final followingDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_currentUser.uid)
-            .get();
+      bool isFollowing = false;
+      if (followingDoc != null && followingDoc.exists) {
         final following = List<String>.from(followingDoc.data()?['following'] ?? []);
-        _isFollowing = following.contains(widget.providerId);
+        isFollowing = following.contains(widget.providerId);
       }
 
-      // Calculate distance
-      try {
-        final position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
-        );
-        final nearbyData = await _supabase.rpc('find_nearby_providers', params: {
-          'p_lat': position.latitude,
-          'p_lng': position.longitude,
-          'p_radius_meters': 50000,
-        });
-        final nearbyList = List<Map<String, dynamic>>.from(nearbyData);
-        final match = nearbyList
-            .where((p) => p['user_id'] == widget.providerId)
-            .firstOrNull;
-        if (match != null) {
-          _distanceKm = (match['distance_meters'] as num) / 1000.0;
-        }
-      } catch (_) {}
-
-      setState(() => _isLoading = false);
+      setState(() {
+        _userData = userData;
+        _providerData = providerData;
+        _services = services;
+        _workPhotos = List<String>.from(providerData?['workPhotos'] ?? []);
+        _isFollowing = isFollowing;
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _getDistanceIfPossible() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
+      );
+      final nearbyData = await _supabase.rpc('find_nearby_providers', params: {
+        'p_lat': position.latitude,
+        'p_lng': position.longitude,
+        'p_radius_meters': 50000,
+      });
+      final nearbyList = List<Map<String, dynamic>>.from(nearbyData);
+      final match = nearbyList
+          .where((p) => p['user_id'] == widget.providerId)
+          .firstOrNull;
+      if (match != null) {
+        _distanceKm = (match['distance_meters'] as num) / 1000.0;
+      }
+    } catch (_) {}
   }
 
   bool get _isSubscribed =>
@@ -134,7 +139,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   Future<void> _startChat() async {
     if (_currentUser == null || !_canContact) return;
 
-    // Check if chat already exists
     final existingChat = await FirebaseFirestore.instance
         .collection('chats')
         .where('participants', arrayContains: _currentUser.uid)
@@ -160,7 +164,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       return;
     }
 
-    // Create new chat
     final chatRef = await FirebaseFirestore.instance.collection('chats').add({
       'participants': [_currentUser.uid, widget.providerId],
       'lastMessage': '',
@@ -286,17 +289,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(80),
                 child: SizedBox(
-                  width: 140,
-                  height: 140,
+                  width: 140, height: 140,
                   child: photoUrl != null
-                      ? Image.network(
-                          ImageOptimizer.medium(photoUrl, width: 280, height: 280),
-                          fit: BoxFit.cover,
-                        )
-                      : Container(
-                          color: AppColors.primary.withAlpha(26),
-                          child: Icon(Icons.person, size: 60, color: AppColors.primary),
-                        ),
+                      ? Image.network(ImageOptimizer.medium(photoUrl, width: 280, height: 280), fit: BoxFit.cover)
+                      : Container(color: AppColors.primary.withAlpha(26), child: Icon(Icons.person, size: 60, color: AppColors.primary)),
                 ),
               ),
             ),
@@ -304,65 +300,40 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Flexible(
-                  child: Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w700,
-                          fontSize: 22,
-                          color: AppColors.textPrimary)),
-                ),
+                Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 22, color: AppColors.textPrimary))),
                 if (_isSubscribed) ...[
                   const SizedBox(width: 6),
-                  SvgPicture.asset('assets/icons/verified.svg',
-                      width: 20,
-                      height: 20,
+                  SvgPicture.asset('assets/icons/verified.svg', width: 20, height: 20,
                       colorFilter: const ColorFilter.mode(AppColors.accent, BlendMode.srcIn)),
                 ],
               ],
             ),
             if (_isSubscribed && isOnline) ...[
               const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 8, height: 8,
-                    decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('Online now',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.success)),
-                ],
-              ),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                const SizedBox(width: 4),
+                const Text('Online now', style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.success)),
+              ]),
             ],
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildStat('$rating', 'Reviews', _isSubscribed ? () {} : null),
-                _buildDivider(),
-                _buildStat('$followerCount', 'Followers', null),
-                _buildDivider(),
-                _buildStat('$followingCount', 'Following', null),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              _buildStat('$rating', 'Reviews', _isSubscribed ? () {} : null),
+              _buildDivider(),
+              _buildStat('$followerCount', 'Followers', null),
+              _buildDivider(),
+              _buildStat('$followingCount', 'Following', null),
+            ]),
             const SizedBox(height: 12),
             if (address.isNotEmpty) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SvgPicture.asset('assets/icons/map_pin.svg', width: 14, height: 14,
-                      colorFilter: const ColorFilter.mode(AppColors.textSecondary, BlendMode.srcIn)),
-                  const SizedBox(width: 4),
-                  Text(
-                    _distanceKm != null ? '${_distanceKm!.toStringAsFixed(1)} km away' : address,
-                    style: const TextStyle(fontFamily: 'Inter', fontSize: 14, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                SvgPicture.asset('assets/icons/map_pin.svg', width: 14, height: 14,
+                    colorFilter: const ColorFilter.mode(AppColors.textSecondary, BlendMode.srcIn)),
+                const SizedBox(width: 4),
+                Text(_distanceKm != null ? '${_distanceKm!.toStringAsFixed(1)} km away' : address,
+                    style: const TextStyle(fontFamily: 'Inter', fontSize: 14, color: AppColors.textSecondary)),
+              ]),
               const SizedBox(height: 4),
               Text(address, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
             ],
@@ -372,56 +343,29 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 20),
             ],
             if (_services.isNotEmpty) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Services',
-                    style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
-              ),
+              Align(alignment: Alignment.centerLeft,
+                  child: Text('Services', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary))),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8, runSpacing: 8,
-                children: _services.map((service) {
-                  return Chip(
-                    label: Text(service['name'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13)),
-                    backgroundColor: AppColors.primary.withAlpha(20),
-                    side: BorderSide.none,
-                  );
-                }).toList(),
-              ),
+              Wrap(spacing: 8, runSpacing: 8, children: _services.map((service) {
+                return Chip(label: Text(service['name'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13)),
+                    backgroundColor: AppColors.primary.withAlpha(20), side: BorderSide.none);
+              }).toList()),
               const SizedBox(height: 20),
             ],
-            Row(
-              children: [
-                Expanded(
-                  child: _buildButton(
-                    _isFollowing ? 'Following' : 'Follow',
-                    _isFollowing ? Icons.person : Icons.person_add_outlined,
-                    _toggleFollow,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildButton('Chat', Icons.chat_bubble_outline,
-                      _canContact ? _startChat : _showLockedToast),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildButton('Call', Icons.call_outlined,
-                      _canContact ? _callProvider : _showLockedToast),
-                ),
-              ],
-            ),
+            Row(children: [
+              Expanded(child: _buildButton(_isFollowing ? 'Following' : 'Follow', _isFollowing ? Icons.person : Icons.person_add_outlined, _toggleFollow)),
+              const SizedBox(width: 8),
+              Expanded(child: _buildButton('Chat', Icons.chat_bubble_outline, _canContact ? _startChat : _showLockedToast)),
+              const SizedBox(width: 8),
+              Expanded(child: _buildButton('Call', Icons.call_outlined, _canContact ? _callProvider : _showLockedToast)),
+            ]),
             const SizedBox(height: 24),
             if (_workPhotos.isNotEmpty) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Work Photos',
-                    style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
-              ),
+              Align(alignment: Alignment.centerLeft,
+                  child: Text('Work Photos', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary))),
               const SizedBox(height: 8),
               GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
+                shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4),
                 itemCount: _workPhotos.length,
                 itemBuilder: (context, index) {
@@ -435,8 +379,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
             const SizedBox(height: 20),
             GestureDetector(
               onTap: _reportProvider,
-              child: const Text('Report Provider',
-                  style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
+              child: const Text('Report Provider', style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
             ),
             const SizedBox(height: 20),
           ],
@@ -448,12 +391,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   Widget _buildStat(String value, String label, VoidCallback? onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        children: [
-          Text(value, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.textPrimary)),
-          Text(label, style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary)),
-        ],
-      ),
+      child: Column(children: [
+        Text(value, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.textPrimary)),
+        Text(label, style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary)),
+      ]),
     );
   }
 
@@ -465,15 +406,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     return SizedBox(
       height: 44,
       child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 18),
+        onPressed: onTap, icon: Icon(icon, size: 18),
         label: Text(label, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 14)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 0,
-        ),
+        style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
       ),
     );
   }
@@ -485,7 +421,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     final isLastRow = row == totalRows - 1;
     final itemsInLastRow = total % 3 == 0 ? 3 : total % 3;
     final isLastInRow = isLastRow && col == itemsInLastRow - 1;
-
     return BorderRadius.only(
       topLeft: Radius.circular(row == 0 && col == 0 ? 12 : 0),
       topRight: Radius.circular(row == 0 && col == 2 ? 12 : 0),
