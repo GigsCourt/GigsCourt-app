@@ -49,29 +49,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (user == null) return;
 
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final providerDoc = await FirebaseFirestore.instance
-          .collection('providers')
-          .doc(user.uid)
-          .get();
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final providerDoc = await FirebaseFirestore.instance.collection('providers').doc(user.uid).get();
 
       final serviceIds = List<int>.from(providerDoc.data()?['services'] ?? []);
       List<Map<String, dynamic>> services = [];
       if (serviceIds.isNotEmpty) {
-        final namesData = await _supabase.rpc('get_service_names', params: {
-          'service_ids': serviceIds,
-        });
+        final namesData = await _supabase.rpc('get_service_names', params: {'service_ids': serviceIds});
         services = List<Map<String, dynamic>>.from(namesData);
       }
 
-      final profileData = {
-        'user': userDoc.data(),
-        'provider': providerDoc.data(),
-        'services': services,
-      };
+      final profileData = {'user': userDoc.data(), 'provider': providerDoc.data(), 'services': services};
       CacheService.set('profile_${user.uid}', profileData, ttl: const Duration(minutes: 5));
 
       setState(() {
@@ -110,10 +98,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         backgroundColor: AppColors.primary,
         title: const Text('Profile', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
-          ),
+          IconButton(icon: const Icon(Icons.menu), onPressed: () => Navigator.of(context).pushNamed('/settings')),
         ],
       ),
       body: SingleChildScrollView(
@@ -146,7 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildStat('$rating', 'Reviews'),
+                GestureDetector(onTap: () => Navigator.of(context).pushNamed('/provider-profile', arguments: FirebaseAuth.instance.currentUser?.uid), child: _buildStat('$rating', 'Reviews')),
                 _buildDivider(),
                 _buildStat('$followerCount', 'Followers'),
                 _buildDivider(),
@@ -154,25 +139,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
-              child: Row(
-                children: [
-                  Icon(subscriptionStatus == 'premium' ? Icons.verified : Icons.workspace_premium_outlined, color: AppColors.accent),
-                  const SizedBox(width: 8),
-                  Text(subscriptionStatus == 'premium' ? 'Premium' : 'Free', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
-                  const Spacer(),
-                  const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-                ],
+            GestureDetector(
+              onTap: () => Navigator.of(context).pushNamed('/subscription'),
+              child: Container(
+                width: double.infinity, padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
+                child: Row(
+                  children: [
+                    Icon(subscriptionStatus == 'premium' ? Icons.verified : Icons.workspace_premium_outlined, color: AppColors.accent),
+                    const SizedBox(width: 8),
+                    Text(subscriptionStatus == 'premium' ? 'Premium' : 'Free', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
+                    const Spacer(),
+                    const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
             if (_services.isNotEmpty) ...[
-              _buildSectionTile('My Services', '${_services.length} services', () {}),
+              _buildSectionTile('My Services', '${_services.length} services', () => Navigator.of(context).pushNamed('/edit-profile')),
               const SizedBox(height: 8),
             ],
-            _buildSectionTile('Work Photos', '${workPhotos.length}/15 photos', () {}),
+            _buildSectionTile('Work Photos', '${workPhotos.length}/15 photos', () => Navigator.of(context).pushNamed('/edit-profile')),
             const SizedBox(height: 8),
             _buildSectionTile('Following', '$followingCount', () {}),
           ],
@@ -220,17 +208,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildSectionTile(String title, String subtitle, VoidCallback onTap) {
-    return Container(
-      width: double.infinity, padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
-      child: Row(children: [
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          Text(subtitle, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity, padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
+        child: Row(children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(subtitle, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
+          ]),
+          const Spacer(),
+          const Icon(Icons.chevron_right, color: AppColors.textSecondary),
         ]),
-        const Spacer(),
-        const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-      ]),
+      ),
     );
   }
 }

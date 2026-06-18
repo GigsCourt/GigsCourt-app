@@ -98,7 +98,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadProviders() async {
-    if (_userLat == null || _userLng == null) return;
+    if (_userLat == null || _userLng == null) {
+  setState(() => _isLoading = false);
+  return;
+}
 
     try {
       final nearbyData = await _supabase.rpc('find_nearby_providers', params: {

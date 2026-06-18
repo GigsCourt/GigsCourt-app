@@ -29,7 +29,7 @@ class _SearchScreenState extends State<SearchScreen> {
   double? _userLat;
   double? _userLng;
   String? _selectedService;
-  final List<Map<String, dynamic>> _services = [];
+  List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _providers = [];
   String? _cacheKey;
@@ -38,12 +38,22 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _getLocation();
+    _loadAllServices();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAllServices() async {
+    try {
+      final data = await _supabase.rpc('get_all_services');
+      setState(() {
+        _services = List<Map<String, dynamic>>.from(data);
+      });
+    } catch (_) {}
   }
 
   Future<void> _getLocation() async {
