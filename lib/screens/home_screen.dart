@@ -174,14 +174,18 @@ class _HomeScreenState extends State<HomeScreen> {
         };
       }).toList();
 
-      Map<int, String> serviceNames = {};
-      if (allServiceIds.isNotEmpty) {
+      // Fetch service names (cached globally for 24 hours)
+      Map<int, String> serviceNames = CacheService.get<Map<int, String>>('service_names') ?? {};
+      final uncachedIds = allServiceIds.where((id) => !serviceNames.containsKey(id)).toList();
+      
+      if (uncachedIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {
-          'service_ids': allServiceIds.toList(),
+          'service_ids': uncachedIds,
         });
         for (final row in List<Map<String, dynamic>>.from(namesData)) {
           serviceNames[row['id'] as int] = row['name'] as String;
         }
+        CacheService.set('service_names', serviceNames, ttl: const Duration(hours: 24));
       }
 
       final providers = providersRaw.map((p) {
@@ -220,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
-    debugPrint('isEarlyAccess: $_isEarlyAccess, status: ${provider['subscriptionStatus']}');
     if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

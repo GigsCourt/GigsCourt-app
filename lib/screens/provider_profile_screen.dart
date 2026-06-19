@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/image_optimizer.dart';
+import '../services/cache_service.dart';
 
 class ProviderProfileScreen extends StatefulWidget {
   final String providerId;
@@ -30,9 +34,24 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   double? _distanceKm;
 
   @override
-  void initState() {
+void initState() {
     super.initState();
-    _loadProfile();
+    _loadCachedOrFetch();
+  }
+
+Future<void> _loadCachedOrFetch() async {
+    final cached = CacheService.get<Map<String, dynamic>>('profile_${widget.providerId}');
+    if (cached != null) {
+      setState(() {
+        _userData = cached['user'];
+        _providerData = cached['provider'];
+        _services = List<Map<String, dynamic>>.from(cached['services'] ?? []);
+        _workPhotos = List<String>.from(cached['workPhotos'] ?? []);
+        _isFollowing = cached['isFollowing'] ?? false;
+        _isLoading = false;
+      });
+    }
+    await _loadProfile();
   }
 
   Future<void> _loadProfile() async {
@@ -72,6 +91,14 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         isFollowing = following.contains(widget.providerId);
       }
 
+           CacheService.set('profile_${widget.providerId}', {
+        'user': userData,
+        'provider': providerData,
+        'services': services,
+        'workPhotos': List<String>.from(providerData?['workPhotos'] ?? []),
+        'isFollowing': isFollowing,
+      }, ttl: const Duration(minutes: 2));
+
       setState(() {
         _userData = userData;
         _providerData = providerData;
@@ -107,7 +134,13 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
 
   bool get _isSubscribed =>
       _providerData?['subscriptionStatus'] == 'premium';
-  bool get _canContact => _isSubscribed;
+
+  bool get _canContact {
+    final isEarlyAccess = !FirebaseRemoteConfig.instance.getBool('subscriptions_enforced');
+    if (isEarlyAccess) return true;
+    final status = _providerData?['subscriptionStatus'] ?? 'free';
+    return status == 'free' || status == 'premium';
+  }
 
   Future<void> _toggleFollow() async {
     if (_currentUser == null) return;
@@ -170,6 +203,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       'lastMessageAt': FieldValue.serverTimestamp(),
     });
 
+    // Track engagement (lead)
+    _trackEngagement('lead');
+
     if (mounted) {
       Navigator.of(context).pushNamed('/chat-conversation', arguments: {
         'chatId': chatRef.id,
@@ -177,6 +213,25 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         'otherUserName': _userData?['displayName'] ?? 'Unknown',
       });
     }
+  }
+
+  Future<void> _trackEngagement(String type) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final idToken = await user.getIdToken();
+      await http.post(
+        Uri.parse('https://us-central1-gigs-court.cloudfunctions.net/trackEngagement'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'providerId': widget.providerId,
+          'type': type,
+        }),
+      );
+    } catch (_) {}
   }
 
   Future<void> _callProvider() async {

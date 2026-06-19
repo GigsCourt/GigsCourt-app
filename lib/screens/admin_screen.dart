@@ -110,10 +110,17 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<Map<String, dynamic>> _loadOverview() async {
-    final usersCount = (await FirebaseFirestore.instance.collection('users').count().get()).count;
-    final providersCount = (await FirebaseFirestore.instance.collection('providers').count().get()).count;
-    final subscribersCount = (await FirebaseFirestore.instance.collection('providers').where('subscriptionStatus', isEqualTo: 'premium').count().get()).count;
-    return {'users': usersCount ?? 0, 'providers': providersCount ?? 0, 'subscribers': subscribersCount ?? 0, 'revenue': 0};
+    final doc = await FirebaseFirestore.instance.collection('stats').doc('counts').get();
+    if (doc.exists) {
+      final data = doc.data()!;
+      return {
+        'users': data['users'] ?? 0,
+        'providers': data['providers'] ?? 0,
+        'subscribers': data['subscribers'] ?? 0,
+        'revenue': 0,
+      };
+    }
+    return {'users': 0, 'providers': 0, 'subscribers': 0, 'revenue': 0};
   }
 
   Widget _buildStatCard(String label, String value) {
