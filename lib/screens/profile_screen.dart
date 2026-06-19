@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/image_optimizer.dart';
-import '../services/cache_service.dart';
 import '../widgets/skeleton_loader.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -25,23 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCachedOrFetch();
-  }
-
-  Future<void> _loadCachedOrFetch() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final cached = CacheService.get<Map<String, dynamic>>('profile_${user.uid}');
-    if (cached != null) {
-      setState(() {
-        _userData = cached['user'];
-        _providerData = cached['provider'];
-        _services = List<Map<String, dynamic>>.from(cached['services'] ?? []);
-        _isLoading = false;
-      });
-    }
-    await _loadProfile();
+    _loadProfile();
   }
 
   Future<void> _loadProfile() async {
@@ -58,9 +41,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final namesData = await _supabase.rpc('get_service_names', params: {'service_ids': serviceIds});
         services = List<Map<String, dynamic>>.from(namesData);
       }
-
-      final profileData = {'user': userDoc.data(), 'provider': providerDoc.data(), 'services': services};
-      CacheService.set('profile_${user.uid}', profileData, ttl: const Duration(minutes: 5));
 
       setState(() {
         _userData = userDoc.data();

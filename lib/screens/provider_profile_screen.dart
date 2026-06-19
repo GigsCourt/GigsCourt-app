@@ -11,7 +11,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/image_optimizer.dart';
-import '../services/cache_service.dart';
 
 class ProviderProfileScreen extends StatefulWidget {
   final String providerId;
@@ -34,24 +33,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   double? _distanceKm;
 
   @override
-void initState() {
+  void initState() {
     super.initState();
-    _loadCachedOrFetch();
-  }
-
-Future<void> _loadCachedOrFetch() async {
-    final cached = CacheService.get<Map<String, dynamic>>('profile_${widget.providerId}');
-    if (cached != null) {
-      setState(() {
-        _userData = cached['user'];
-        _providerData = cached['provider'];
-        _services = List<Map<String, dynamic>>.from(cached['services'] ?? []);
-        _workPhotos = List<String>.from(cached['workPhotos'] ?? []);
-        _isFollowing = cached['isFollowing'] ?? false;
-        _isLoading = false;
-      });
-    }
-    await _loadProfile();
+    _loadProfile();
   }
 
   Future<void> _loadProfile() async {
@@ -90,14 +74,6 @@ Future<void> _loadCachedOrFetch() async {
         final following = List<String>.from(followingDoc.data()?['following'] ?? []);
         isFollowing = following.contains(widget.providerId);
       }
-
-           CacheService.set('profile_${widget.providerId}', {
-        'user': userData,
-        'provider': providerData,
-        'services': services,
-        'workPhotos': List<String>.from(providerData?['workPhotos'] ?? []),
-        'isFollowing': isFollowing,
-      }, ttl: const Duration(minutes: 2));
 
       setState(() {
         _userData = userData;
@@ -203,7 +179,6 @@ Future<void> _loadCachedOrFetch() async {
       'lastMessageAt': FieldValue.serverTimestamp(),
     });
 
-    // Track engagement (lead)
     _trackEngagement('lead');
 
     if (mounted) {

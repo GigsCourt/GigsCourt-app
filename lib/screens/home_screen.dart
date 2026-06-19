@@ -36,7 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
     _scrollController.addListener(_onScroll);
-    _loadCachedOrFetch();
+    _getLocationAndLoadProviders();
   }
 
   @override
@@ -51,24 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _showScrollToTop = _scrollController.offset > 400;
       });
-    }
-  }
-
-  Future<void> _loadCachedOrFetch() async {
-    final cached = CacheService.get<List<Map<String, dynamic>>>('home_providers');
-    if (cached != null) {
-      setState(() {
-        _allProviders = cached;
-        _featuredProviders = cached.where((p) => p['isVerified'] == true).toList();
-        _isLoading = false;
-      });
-    }
-    
-    // Timeout after 10 seconds
-    try {
-      await _getLocationAndLoadProviders().timeout(const Duration(seconds: 10));
-    } catch (e) {
-      setState(() => _isLoading = false);
     }
   }
 
@@ -105,15 +87,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadProviders() async {
     if (_userLat == null || _userLng == null) {
-  setState(() => _isLoading = false);
-  return;
-}
+      setState(() => _isLoading = false);
+      return;
+    }
 
     try {
-      final nearbyData = await _supabase.rpc('find_nearby_providers', params: {
+      final nearbyData = await _supabase.rpc('find_all_providers', params: {
         'p_lat': _userLat,
         'p_lng': _userLng,
-        'p_radius_meters': 50000,
       });
 
       final nearbyUsers = List<Map<String, dynamic>>.from(nearbyData);
@@ -124,11 +105,25 @@ class _HomeScreenState extends State<HomeScreen> {
           _allProviders = [];
           _isLoading = false;
         });
-        CacheService.remove('home_providers');
         return;
       }
 
-      final userIds = nearbyUsers.map((p) => p['user_id'] as String).toList();
+      // Filter out current user
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      final filteredUsers = nearbyUsers
+          .where((p) => p['user_id'] != currentUserId)
+          .toList();
+
+      if (filteredUsers.isEmpty) {
+        setState(() {
+          _featuredProviders = [];
+          _allProviders = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final userIds = filteredUsers.map((p) => p['user_id'] as String).toList();
       final user = FirebaseAuth.instance.currentUser;
       final idToken = await user!.getIdToken();
 
@@ -150,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = data['results'] as Map<String, dynamic>;
 
       final allServiceIds = <int>{};
-      final providersRaw = nearbyUsers.map((supa) {
+      final providersRaw = filteredUsers.map((supa) {
         final id = supa['user_id'] as String;
         final fireData = results[id] as Map<String, dynamic>?;
         final provider = fireData?['provider'] as Map<String, dynamic>?;
@@ -174,7 +169,6 @@ class _HomeScreenState extends State<HomeScreen> {
         };
       }).toList();
 
-      // Fetch service names (cached globally for 24 hours)
       Map<int, String> serviceNames = CacheService.get<Map<int, String>>('service_names') ?? {};
       final uncachedIds = allServiceIds.where((id) => !serviceNames.containsKey(id)).toList();
       
@@ -211,8 +205,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return (b['rating'] as double).compareTo(a['rating'] as double);
       });
 
-      CacheService.set('home_providers', providers, ttl: const Duration(minutes: 2));
-
       setState(() {
         _featuredProviders = providers.where((p) => p['isVerified'] == true).toList();
         _allProviders = providers;
@@ -237,7 +229,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refresh() async {
-    CacheService.remove('home_providers');
     await _loadProviders();
   }
 

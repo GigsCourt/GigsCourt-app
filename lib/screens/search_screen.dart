@@ -7,7 +7,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
-import '../services/cache_service.dart';
 import '../widgets/provider_card.dart';
 import '../widgets/skeleton_loader.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
@@ -33,7 +32,6 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _providers = [];
-  String? _cacheKey;
 
   @override
   void initState() {
@@ -93,21 +91,8 @@ class _SearchScreenState extends State<SearchScreen> {
       _selectedService = service['name'];
       _searchController.text = service['name'];
       _searchResults = [];
-      _cacheKey = 'search_${service['name']}_$_radiusKm';
     });
-    _loadCachedOrFetch();
-  }
-
-  Future<void> _loadCachedOrFetch() async {
-    if (_cacheKey == null) return;
-    final cached = CacheService.get<List<Map<String, dynamic>>>(_cacheKey!);
-    if (cached != null) {
-      setState(() {
-        _providers = cached;
-        _isLoading = false;
-      });
-    }
-    await _findProviders();
+    _findProviders();
   }
 
   Future<void> _findProviders() async {
@@ -127,7 +112,6 @@ class _SearchScreenState extends State<SearchScreen> {
           _providers = [];
           _isLoading = false;
         });
-        if (_cacheKey != null) CacheService.remove(_cacheKey!);
         return;
       }
 
@@ -219,10 +203,6 @@ class _SearchScreenState extends State<SearchScreen> {
         return (b['rating'] as double).compareTo(a['rating'] as double);
       });
 
-      if (_cacheKey != null) {
-        CacheService.set(_cacheKey!, providers, ttl: const Duration(minutes: 2));
-      }
-
       setState(() {
         _providers = providers;
         _isLoading = false;
@@ -311,8 +291,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         label: '${_radiusKm.toInt()} km',
                         onChanged: (value) {
                           setState(() => _radiusKm = value);
-                          _cacheKey = 'search_${_selectedService}_$_radiusKm';
-                          _loadCachedOrFetch();
+                          _findProviders();
                         },
                       ),
                     ),
