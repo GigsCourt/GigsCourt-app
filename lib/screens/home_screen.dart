@@ -183,6 +183,13 @@ class _HomeScreenState extends State<HomeScreen> {
         CacheService.set('service_names', serviceNames, ttl: const Duration(hours: 24));
       }
 
+      debugPrint('Service names loaded: ${serviceNames.length}');
+
+      if (providersRaw.isNotEmpty) {
+    debugPrint('First provider serviceIds: ${providersRaw.first['serviceIds']}');
+    debugPrint('First provider names: ${(providersRaw.first['serviceIds'] as List<int>).map((id) => serviceNames[id] ?? id.toString()).toList()}');
+}
+
       final providers = providersRaw.map((p) {
         final names = (p['serviceIds'] as List<int>)
             .map((id) => serviceNames[id] ?? id.toString())
