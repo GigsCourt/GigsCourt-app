@@ -29,15 +29,15 @@ exports.trackEngagement = functions.https.onRequest(async (req, res) => {
     }
 
     const db = admin.firestore();
-    const providerRef = db.collection('providers').doc(providerId);
-    const providerDoc = await providerRef.get();
+    const userRef = db.collection('users').doc(providerId);
+    const userDoc = await userRef.get();
 
-    if (!providerDoc.exists) {
-      res.status(404).json({ error: 'Provider not found' });
+    if (!userDoc.exists) {
+      res.status(404).json({ error: 'User not found' });
       return;
     }
 
-    const data = providerDoc.data();
+    const data = userDoc.data();
     const currentStatus = data.subscriptionStatus || 'free';
 
     if (currentStatus === 'premium' || currentStatus === 'locked') {
@@ -56,7 +56,7 @@ exports.trackEngagement = functions.https.onRequest(async (req, res) => {
       updates.subscriptionStatus = 'locked';
     }
 
-    await providerRef.update(updates);
+    await userRef.update(updates);
 
     res.json({
       success: true,

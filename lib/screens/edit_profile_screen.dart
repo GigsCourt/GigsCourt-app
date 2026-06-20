@@ -17,7 +17,6 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
-  final _addressController = TextEditingController();
   String? _photoUrl;
   List<Map<String, dynamic>> _selectedServices = [];
   bool _isSaving = false;
@@ -33,16 +32,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (user == null) return;
 
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final providerDoc = await FirebaseFirestore.instance.collection('providers').doc(user.uid).get();
-
     final userData = userDoc.data();
-    final providerData = providerDoc.data();
 
     _nameController.text = userData?['displayName'] ?? '';
     _bioController.text = userData?['bio'] ?? '';
     _photoUrl = userData?['photoUrl'];
 
-    final serviceIds = List<int>.from(providerData?['services'] ?? []);
+    final serviceIds = List<int>.from(userData?['services'] ?? []);
     if (serviceIds.isNotEmpty) {
       final namesData = await Supabase.instance.client.rpc('get_service_names', params: {
         'service_ids': serviceIds,
@@ -64,9 +60,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'displayName': _nameController.text.trim(),
         'bio': _bioController.text.trim(),
         if (_photoUrl != null) 'photoUrl': _photoUrl,
-      });
-
-      await FirebaseFirestore.instance.collection('providers').doc(user.uid).update({
         'services': _selectedServices.map((s) => s['id']).toList(),
       });
 
@@ -91,7 +84,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _bioController.dispose();
-    _addressController.dispose();
     super.dispose();
   }
 

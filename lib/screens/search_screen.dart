@@ -4,12 +4,14 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '../theme/app_theme.dart';
+import '../services/cache_service.dart';
 import '../widgets/provider_card.dart';
 import '../widgets/skeleton_loader.dart';
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -22,9 +24,11 @@ class _SearchScreenState extends State<SearchScreen> {
   final _supabase = Supabase.instance.client;
   final _searchController = TextEditingController();
   final MapController _mapController = MapController();
+  final _remoteConfig = FirebaseRemoteConfig.instance;
 
   bool _isMapView = true;
   bool _isLoading = false;
+  bool _isEarlyAccess = false;
   double _radiusKm = 10;
   double? _userLat;
   double? _userLng;
@@ -36,6 +40,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
     _getLocation();
     _loadAllServices();
   }
@@ -115,51 +120,43 @@ class _SearchScreenState extends State<SearchScreen> {
         return;
       }
 
-      final userIds = nearbyUsers.map((p) => p['user_id'] as String).toList();
-      final user = FirebaseAuth.instance.currentUser;
-      final idToken = await user!.getIdToken();
+      // Fetch all user data in parallel
+      final userFutures = nearbyUsers.map((supa) {
+        final id = supa['user_id'] as String;
+        return FirebaseFirestore.instance.collection('users').doc(id).get();
+      }).toList();
 
-      final response = await http.post(
-        Uri.parse('https://us-central1-gigs-court.cloudfunctions.net/getProviderDetails'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({'userIds': userIds}),
-      );
-
-      if (response.statusCode != 200) {
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      final data = jsonDecode(response.body);
-      final results = data['results'] as Map<String, dynamic>;
+      final userDocs = await Future.wait(userFutures);
 
       final allServiceIds = <int>{};
-      final providersRaw = nearbyUsers.map((supa) {
+      final providersRaw = <Map<String, dynamic>>[];
+
+      for (int i = 0; i < nearbyUsers.length; i++) {
+        final supa = nearbyUsers[i];
+        final userDoc = userDocs[i];
+        if (!userDoc.exists) continue;
+
         final id = supa['user_id'] as String;
-        final fireData = results[id] as Map<String, dynamic>?;
-        final provider = fireData?['provider'] as Map<String, dynamic>?;
-        final userData = fireData?['user'] as Map<String, dynamic>?;
-        final serviceIds = (provider?['services'] as List<dynamic>?)
-                ?.map((s) => s as int)
-                .toList() ?? [];
+        final userData = userDoc.data()!;
+        final serviceIds = List<int>.from(userData['services'] ?? []);
         allServiceIds.addAll(serviceIds);
-        return {
+
+        providersRaw.add({
           'userId': id,
-          'name': userData?['displayName'] ?? 'Unknown',
-          'photoUrl': userData?['photoUrl'],
-          'isVerified': provider?['subscriptionStatus'] == 'premium',
-          'subscriptionStatus': provider?['subscriptionStatus'] ?? 'free',
-          'isOnline': provider?['isOnline'] ?? false,
+          'name': userData['displayName'] ?? 'Unknown',
+          'photoUrl': userData['photoUrl'],
+          'isVerified': userData['subscriptionStatus'] == 'premium',
+          'subscriptionStatus': userData['subscriptionStatus'] ?? 'free',
+          'isOnline': _isEarlyAccess
+              ? (userData['isOnline'] ?? false)
+              : (userData['subscriptionStatus'] == 'premium' && (userData['isOnline'] ?? false)),
           'serviceIds': serviceIds,
-          'rating': (provider?['averageRating'] ?? 0.0).toDouble(),
-          'reviewCount': provider?['reviewCount'] ?? 0,
+          'rating': (userData['averageRating'] ?? 0.0).toDouble(),
+          'reviewCount': userData['reviewCount'] ?? 0,
           'distanceKm': (supa['distance_meters'] as num) / 1000.0,
-          'lastReviewedAt': provider?['lastReviewedAt'],
-        };
-      }).toList();
+          'lastReviewedAt': userData['lastReviewedAt'],
+        });
+      }
 
       final serviceId = _services.firstWhere(
         (s) => s['name'] == _selectedService,
@@ -170,14 +167,17 @@ class _SearchScreenState extends State<SearchScreen> {
           .where((p) => (p['serviceIds'] as List<int>).contains(serviceId))
           .toList();
 
-      Map<int, String> serviceNames = {};
-      if (allServiceIds.isNotEmpty) {
+      Map<int, String> serviceNames = CacheService.get<Map<int, String>>('service_names') ?? {};
+      final uncachedIds = allServiceIds.where((id) => !serviceNames.containsKey(id)).toList();
+
+      if (uncachedIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {
-          'service_ids': allServiceIds.toList(),
+          'service_ids': uncachedIds,
         });
         for (final row in List<Map<String, dynamic>>.from(namesData)) {
           serviceNames[row['id'] as int] = row['name'] as String;
         }
+        CacheService.set('service_names', serviceNames, ttl: const Duration(hours: 24));
       }
 
       final providers = filtered.map((p) {
@@ -213,8 +213,8 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
-    final isEarlyAccess = !FirebaseRemoteConfig.instance.getBool('subscriptions_enforced');
-    if (!isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
+    if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
+      _sendBlockedNotification(provider['userId']);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('This provider is not currently accepting new clients.'),
@@ -224,6 +224,27 @@ class _SearchScreenState extends State<SearchScreen> {
     } else {
       Navigator.of(context).pushNamed('/provider-profile', arguments: provider['userId']);
     }
+  }
+
+  Future<void> _sendBlockedNotification(String providerId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final idToken = await user.getIdToken();
+      await http.post(
+        Uri.parse('https://us-central1-gigs-court.cloudfunctions.net/createNotification'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'userId': providerId,
+          'title': 'Someone tried to view your profile',
+          'body': 'A potential client tried to contact you. Subscribe to accept new clients.',
+          'type': 'locked',
+        }),
+      );
+    } catch (_) {}
   }
 
   @override

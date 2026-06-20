@@ -116,10 +116,6 @@ class _SetupScreenState extends State<SetupScreen> {
         'photoUrl': _photoUrl,
         'email': user.email,
         'isSetupComplete': true,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      await FirebaseFirestore.instance.collection('providers').doc(user.uid).set({
         'services': _selectedServices.map((s) => s['id']).toList(),
         'workPhotos': [],
         'subscriptionStatus': 'free',
@@ -127,6 +123,14 @@ class _SetupScreenState extends State<SetupScreen> {
         'reviewCount': 0,
         'averageRating': 0.0,
         'lastReviewedAt': null,
+        'followerCount': 0,
+        'followingCount': 0,
+        'following': [],
+        'pushNotifications': true,
+        'emailNotifications': true,
+        'isOnline': false,
+        'lastSeen': null,
+        'phone': null,
         'createdAt': FieldValue.serverTimestamp(),
       });
 

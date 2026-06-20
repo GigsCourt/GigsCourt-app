@@ -18,12 +18,10 @@ class _AdminScreenState extends State<AdminScreen> {
   final _sections = [
     'Overview',
     'Service Approvals',
-    'Reports',
+    'Tickets',
     'Subscriptions',
     'Users',
-    'Tickets',
     'Revenue',
-    'Disputes',
   ];
 
   @override
@@ -73,12 +71,10 @@ class _AdminScreenState extends State<AdminScreen> {
     switch (_selectedSection) {
       case 0: return _buildOverview();
       case 1: return _buildServiceApprovals();
-      case 2: return _buildReports();
+      case 2: return _buildTickets();
       case 3: return _buildSubscriptions();
       case 4: return _buildUsers();
-      case 5: return _buildTickets();
-      case 6: return _buildRevenue();
-      case 7: return _buildDisputes();
+      case 5: return _buildRevenue();
       default: return const SizedBox();
     }
   }
@@ -98,7 +94,6 @@ class _AdminScreenState extends State<AdminScreen> {
               shrinkWrap: true, crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1.6,
               children: [
                 _buildStatCard('Total Users', '${data['users']}'),
-                _buildStatCard('Providers', '${data['providers']}'),
                 _buildStatCard('Subscribers', '${data['subscribers']}'),
                 _buildStatCard('Revenue', 'NGN ${data['revenue']}'),
               ],
@@ -115,12 +110,11 @@ class _AdminScreenState extends State<AdminScreen> {
       final data = doc.data()!;
       return {
         'users': data['users'] ?? 0,
-        'providers': data['providers'] ?? 0,
         'subscribers': data['subscribers'] ?? 0,
         'revenue': 0,
       };
     }
-    return {'users': 0, 'providers': 0, 'subscribers': 0, 'revenue': 0};
+    return {'users': 0, 'subscribers': 0, 'revenue': 0};
   }
 
   Widget _buildStatCard(String label, String value) {
@@ -175,36 +169,42 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() {});
   }
 
-  Widget _buildReports() {
+  Widget _buildTickets() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('reports').orderBy('createdAt', descending: true).snapshots(),
+      stream: FirebaseFirestore.instance.collection('tickets').orderBy('createdAt', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final reports = snapshot.data!.docs;
-        if (reports.isEmpty) return const Center(child: Text('No reports.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
+        final tickets = snapshot.data!.docs;
+        if (tickets.isEmpty) return const Center(child: Text('No tickets.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
         return ListView.builder(
-          padding: const EdgeInsets.all(16), itemCount: reports.length,
+          padding: const EdgeInsets.all(16), itemCount: tickets.length,
           itemBuilder: (context, index) {
-            final report = reports[index].data() as Map<String, dynamic>;
+            final data = tickets[index].data() as Map<String, dynamic>;
+            final type = data['type'] ?? 'report';
             return Card(
               color: AppColors.surface, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Text(report['reason'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
-                    const Spacer(), _buildStatusBadge(report['status'] ?? 'pending'),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: AppColors.primary.withAlpha(26), borderRadius: BorderRadius.circular(4)),
+                      child: Text(type, style: const TextStyle(fontFamily: 'Inter', fontSize: 10, color: AppColors.primary)),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(data['subject'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600))),
+                    _buildStatusBadge(data['status'] ?? 'pending'),
                   ]),
-                  if (report['details'] != null) ...[
+                  if (data['message'] != null && (data['message'] as String).isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text(report['details'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
+                    Text(data['message'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
                   ],
                   const SizedBox(height: 8),
-                  Row(children: [
-                    TextButton(onPressed: () => _updateReportStatus(reports[index].id, 'dismissed'), child: const Text('Dismiss')),
-                    TextButton(onPressed: () => _updateReportStatus(reports[index].id, 'warned'), child: const Text('Warn')),
-                    TextButton(onPressed: () => _updateReportStatus(reports[index].id, 'suspended'), child: const Text('Suspend', style: TextStyle(color: AppColors.error))),
-                  ]),
+                  TextButton(
+                    onPressed: () => FirebaseFirestore.instance.collection('tickets').doc(tickets[index].id).update({'status': 'resolved', 'resolvedAt': FieldValue.serverTimestamp()}),
+                    child: const Text('Mark Resolved'),
+                  ),
                 ]),
               ),
             );
@@ -214,13 +214,9 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Future<void> _updateReportStatus(String docId, String status) async {
-    await FirebaseFirestore.instance.collection('reports').doc(docId).update({'status': status, 'resolvedAt': FieldValue.serverTimestamp()});
-  }
-
   Widget _buildSubscriptions() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('providers').where('subscriptionStatus', isEqualTo: 'premium').snapshots(),
+      stream: FirebaseFirestore.instance.collection('users').where('subscriptionStatus', isEqualTo: 'premium').snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final subs = snapshot.data!.docs;
@@ -229,25 +225,20 @@ class _AdminScreenState extends State<AdminScreen> {
           padding: const EdgeInsets.all(16), itemCount: subs.length,
           itemBuilder: (context, index) {
             final data = subs[index].data() as Map<String, dynamic>;
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance.collection('users').doc(subs[index].id).get(),
-              builder: (ctx, userSnap) {
-                final name = (userSnap.data?.data() as Map<String, dynamic>?)?['displayName'] ?? 'Unknown';
-                final expiry = data['subscriptionExpiry'] as String?;
-                return Card(
-                  color: AppColors.surface, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: ListTile(
-                    title: Text(name, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
-                    subtitle: Text(expiry != null ? 'Expires: ${_formatDate(DateTime.parse(expiry))}' : 'Active', style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary)),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await FirebaseFirestore.instance.collection('providers').doc(subs[index].id).update({'subscriptionStatus': 'free', 'subscriptionExpiry': null});
-                      },
-                      child: const Text('Revoke', style: TextStyle(color: AppColors.error)),
-                    ),
-                  ),
-                );
-              },
+            final name = data['displayName'] ?? 'Unknown';
+            final expiry = data['subscriptionExpiry'] as String?;
+            return Card(
+              color: AppColors.surface, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                title: Text(name, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+                subtitle: Text(expiry != null ? 'Expires: ${_formatDate(DateTime.parse(expiry))}' : 'Active', style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary)),
+                trailing: TextButton(
+                  onPressed: () async {
+                    await FirebaseFirestore.instance.collection('users').doc(subs[index].id).update({'subscriptionStatus': 'free', 'subscriptionExpiry': null});
+                  },
+                  child: const Text('Revoke', style: TextStyle(color: AppColors.error)),
+                ),
+              ),
             );
           },
         );
@@ -293,45 +284,9 @@ class _AdminScreenState extends State<AdminScreen> {
     ]);
   }
 
-  Widget _buildTickets() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('support_tickets').orderBy('createdAt', descending: true).snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final tickets = snapshot.data!.docs;
-        if (tickets.isEmpty) return const Center(child: Text('No support tickets.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
-        return ListView.builder(
-          padding: const EdgeInsets.all(16), itemCount: tickets.length,
-          itemBuilder: (context, index) {
-            final data = tickets[index].data() as Map<String, dynamic>;
-            return Card(
-              color: AppColors.surface, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Expanded(child: Text(data['subject'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600))),
-                    _buildStatusBadge(data['status'] ?? 'open'),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text(data['message'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => FirebaseFirestore.instance.collection('support_tickets').doc(tickets[index].id).update({'status': 'resolved', 'updatedAt': FieldValue.serverTimestamp()}),
-                    child: const Text('Mark Resolved'),
-                  ),
-                ]),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Widget _buildRevenue() {
     return FutureBuilder<QuerySnapshot>(
-      future: FirebaseFirestore.instance.collection('providers').where('subscriptionStatus', isEqualTo: 'premium').get(),
+      future: FirebaseFirestore.instance.collection('users').where('subscriptionStatus', isEqualTo: 'premium').get(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final count = snapshot.data!.docs.length;
@@ -346,44 +301,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _buildDisputes() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('disputes').orderBy('createdAt', descending: true).snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final disputes = snapshot.data!.docs;
-        if (disputes.isEmpty) return const Center(child: Text('No disputes.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
-        return ListView.builder(
-          padding: const EdgeInsets.all(16), itemCount: disputes.length,
-          itemBuilder: (context, index) {
-            final data = disputes[index].data() as Map<String, dynamic>;
-            return Card(
-              color: AppColors.surface, margin: const EdgeInsets.only(bottom: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Expanded(child: Text(data['reason'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600))),
-                    _buildStatusBadge(data['status'] ?? 'open'),
-                  ]),
-                  if (data['details'] != null) ...[
-                    const SizedBox(height: 4),
-                    Text(data['details'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
-                  ],
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => FirebaseFirestore.instance.collection('disputes').doc(disputes[index].id).update({'status': 'resolved', 'resolvedAt': FieldValue.serverTimestamp()}),
-                    child: const Text('Resolve'),
-                  ),
-                ]),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Widget _buildStatusBadge(String status) {
     Color color;
     switch (status) {
@@ -391,6 +308,8 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'dismissed': color = AppColors.textSecondary;
       case 'warned': color = AppColors.accent;
       case 'suspended': color = AppColors.error;
+      case 'open': color = AppColors.accent;
+      case 'resolved': color = AppColors.success;
       default: color = AppColors.textSecondary;
     }
     return Container(

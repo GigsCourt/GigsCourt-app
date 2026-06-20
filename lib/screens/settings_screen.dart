@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -57,8 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           _buildSection('Account'),
           _buildTile(Icons.person_outline, 'Edit Profile', onTap: () {
-  Navigator.of(context).pushNamed('/edit-profile');
-}),
+            Navigator.of(context).pushNamed('/edit-profile');
+          }),
           _buildTile(Icons.email_outlined, 'Email', subtitle: user?.email ?? ''),
           _buildTile(Icons.lock_outline, 'Change Password', onTap: () async {
             await FirebaseAuth.instance.sendPasswordResetEmail(email: user!.email!);
@@ -188,7 +189,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await FirebaseAuth.instance.currentUser?.delete();
+              final user = FirebaseAuth.instance.currentUser;
+              if (user != null) {
+                await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
+                await Supabase.instance.client.rpc('remove_user_data', params: {'p_user_id': user.uid});
+                await user.delete();
+              }
               if (context.mounted) {
                 Navigator.of(context).pushNamedAndRemoveUntil('/splash', (route) => false);
               }

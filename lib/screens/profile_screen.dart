@@ -17,7 +17,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _supabase = Supabase.instance.client;
   Map<String, dynamic>? _userData;
-  Map<String, dynamic>? _providerData;
   List<Map<String, dynamic>> _services = [];
   bool _isLoading = true;
 
@@ -33,9 +32,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final providerDoc = await FirebaseFirestore.instance.collection('providers').doc(user.uid).get();
 
-      final serviceIds = List<int>.from(providerDoc.data()?['services'] ?? []);
+      final userData = userDoc.data()!;
+      final serviceIds = List<int>.from(userData['services'] ?? []);
       List<Map<String, dynamic>> services = [];
       if (serviceIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {'service_ids': serviceIds});
@@ -43,8 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       setState(() {
-        _userData = userDoc.data();
-        _providerData = providerDoc.data();
+        _userData = userData;
         _services = services;
         _isLoading = false;
       });
@@ -65,12 +63,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final name = _userData?['displayName'] ?? 'Unknown';
     final photoUrl = _userData?['photoUrl'];
-    final isVerified = _providerData?['subscriptionStatus'] == 'premium';
-    final rating = (_providerData?['averageRating'] ?? 0.0).toDouble();
+    final isVerified = _userData?['subscriptionStatus'] == 'premium';
+    final rating = (_userData?['averageRating'] ?? 0.0).toDouble();
     final followerCount = _userData?['followerCount'] ?? 0;
     final followingCount = _userData?['followingCount'] ?? 0;
-    final subscriptionStatus = _providerData?['subscriptionStatus'] ?? 'free';
-    final workPhotos = List<String>.from(_providerData?['workPhotos'] ?? []);
+    final subscriptionStatus = _userData?['subscriptionStatus'] ?? 'free';
+    final workPhotos = List<String>.from(_userData?['workPhotos'] ?? []);
 
     return Scaffold(
       backgroundColor: AppColors.background,

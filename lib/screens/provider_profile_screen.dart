@@ -24,31 +24,39 @@ class ProviderProfileScreen extends StatefulWidget {
 class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   final _supabase = Supabase.instance.client;
   final _currentUser = FirebaseAuth.instance.currentUser;
+  final _remoteConfig = FirebaseRemoteConfig.instance;
   Map<String, dynamic>? _userData;
-  Map<String, dynamic>? _providerData;
   List<Map<String, dynamic>> _services = [];
   List<String> _workPhotos = [];
   bool _isLoading = true;
   bool _isFollowing = false;
+  bool _isEarlyAccess = false;
   double? _distanceKm;
+  StreamSubscription? _userStream;
 
   @override
   void initState() {
     super.initState();
+    _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
     _loadProfile();
+    _listenToRealTimeUpdates();
+  }
+
+  @override
+  void dispose() {
+    _userStream?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadProfile() async {
     try {
       final userDocFuture = FirebaseFirestore.instance.collection('users').doc(widget.providerId).get();
-      final providerDocFuture = FirebaseFirestore.instance.collection('providers').doc(widget.providerId).get();
       final followingDocFuture = _currentUser != null
           ? FirebaseFirestore.instance.collection('users').doc(_currentUser.uid).get()
           : Future.value(null);
       final distanceFuture = _getDistanceIfPossible();
 
       final userDoc = await userDocFuture;
-      final providerDoc = await providerDocFuture;
       final followingDoc = await followingDocFuture;
       await distanceFuture;
 
@@ -57,11 +65,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         return;
       }
 
-      final userData = userDoc.data();
-      final providerData = providerDoc.data();
+      final userData = userDoc.data()!;
 
       List<Map<String, dynamic>> services = [];
-      final serviceIds = List<int>.from(providerData?['services'] ?? []);
+      final serviceIds = List<int>.from(userData['services'] ?? []);
       if (serviceIds.isNotEmpty) {
         final namesData = await _supabase.rpc('get_service_names', params: {
           'service_ids': serviceIds,
@@ -77,15 +84,26 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
 
       setState(() {
         _userData = userData;
-        _providerData = providerData;
         _services = services;
-        _workPhotos = List<String>.from(providerData?['workPhotos'] ?? []);
+        _workPhotos = List<String>.from(userData['workPhotos'] ?? []);
         _isFollowing = isFollowing;
         _isLoading = false;
       });
     } catch (e) {
       setState(() => _isLoading = false);
     }
+  }
+
+  void _listenToRealTimeUpdates() {
+    _userStream = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.providerId)
+        .snapshots()
+        .listen((doc) {
+      if (doc.exists && mounted) {
+        setState(() => _userData = doc.data());
+      }
+    });
   }
 
   Future<void> _getDistanceIfPossible() async {
@@ -109,22 +127,41 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   }
 
   bool get _isSubscribed =>
-      _providerData?['subscriptionStatus'] == 'premium';
+      _userData?['subscriptionStatus'] == 'premium';
+
+  bool get _canShowOnlineStatus =>
+      _isEarlyAccess || _isSubscribed;
+
+  bool get _isOnline =>
+      _userData?['isOnline'] ?? false;
+
+  String? get _lastSeen {
+    final lastSeen = _userData?['lastSeen'];
+    if (lastSeen == null) return null;
+    final date = (lastSeen as Timestamp).toDate();
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
 
   bool get _canContact {
-    final isEarlyAccess = !FirebaseRemoteConfig.instance.getBool('subscriptions_enforced');
-    if (isEarlyAccess) return true;
-    final status = _providerData?['subscriptionStatus'] ?? 'free';
+    if (_isEarlyAccess) return true;
+    final status = _userData?['subscriptionStatus'] ?? 'free';
     return status == 'free' || status == 'premium';
+  }
+
+  bool get _canViewReviews {
+    if (_isEarlyAccess) return true;
+    return _isSubscribed;
   }
 
   Future<void> _toggleFollow() async {
     if (_currentUser == null) return;
 
-    final userRef =
-        FirebaseFirestore.instance.collection('users').doc(_currentUser.uid);
-    final providerRef =
-        FirebaseFirestore.instance.collection('users').doc(widget.providerId);
+    final userRef = FirebaseFirestore.instance.collection('users').doc(_currentUser.uid);
+    final providerRef = FirebaseFirestore.instance.collection('users').doc(widget.providerId);
 
     if (_isFollowing) {
       await userRef.update({
@@ -133,7 +170,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       await providerRef.update({
         'followerCount': FieldValue.increment(-1),
       });
-      setState(() => _isFollowing = false);
     } else {
       await userRef.update({
         'following': FieldValue.arrayUnion([widget.providerId]),
@@ -141,7 +177,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       await providerRef.update({
         'followerCount': FieldValue.increment(1),
       });
-      setState(() => _isFollowing = true);
     }
   }
 
@@ -179,7 +214,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       'lastMessageAt': FieldValue.serverTimestamp(),
     });
 
-    _trackEngagement('lead');
+    if (!_isEarlyAccess) {
+      _trackEngagement('lead');
+    }
 
     if (mounted) {
       Navigator.of(context).pushNamed('/chat-conversation', arguments: {
@@ -247,11 +284,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     );
 
     if (reason != null && _currentUser != null) {
-      await FirebaseFirestore.instance.collection('reports').add({
-        'reportedUserId': widget.providerId,
-        'reportedByUserId': _currentUser.uid,
-        'reason': reason,
-        'details': '',
+      await FirebaseFirestore.instance.collection('tickets').add({
+        'type': 'report',
+        'submittedBy': _currentUser.uid,
+        'targetUserId': widget.providerId,
+        'subject': reason,
+        'message': '',
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
         'resolvedAt': null,
@@ -298,11 +336,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     final name = _userData!['displayName'] ?? 'Unknown';
     final bio = _userData!['bio'] ?? '';
     final photoUrl = _userData!['photoUrl'];
-    final isOnline = _providerData?['isOnline'] ?? false;
-    final rating = (_providerData?['averageRating'] ?? 0.0).toDouble();
+    final rating = (_userData!['averageRating'] ?? 0.0).toDouble();
     final followerCount = _userData!['followerCount'] ?? 0;
     final followingCount = _userData!['followingCount'] ?? 0;
-    final address = _providerData?['address'] ?? '';
+    final address = _userData!['address'] ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -339,17 +376,25 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                 ],
               ],
             ),
-            if (_isSubscribed && isOnline) ...[
+            if (_canShowOnlineStatus) ...[
               const SizedBox(height: 4),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                Container(width: 8, height: 8,
+                    decoration: BoxDecoration(
+                        color: _isOnline ? AppColors.success : AppColors.textSecondary,
+                        shape: BoxShape.circle)),
                 const SizedBox(width: 4),
-                const Text('Online now', style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.success)),
+                Text(
+                  _isOnline ? 'Online now' : 'Last seen ${_lastSeen ?? "recently"}',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 13,
+                      color: _isOnline ? AppColors.success : AppColors.textSecondary),
+                ),
               ]),
             ],
             const SizedBox(height: 16),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _buildStat('$rating', 'Reviews', _isSubscribed ? () {} : null),
+              _buildStat('$rating', 'Reviews',
+                  _canViewReviews ? () => Navigator.of(context).pushNamed('/reviews', arguments: widget.providerId) : null),
               _buildDivider(),
               _buildStat('$followerCount', 'Followers', null),
               _buildDivider(),

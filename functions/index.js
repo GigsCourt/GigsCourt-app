@@ -1,5 +1,4 @@
 const getImageKitToken = require("./getImageKitToken");
-const getProviderDetails = require("./getProviderDetails");
 const getSubscriptionPrice = require("./getSubscriptionPrice");
 const createNotification = require("./createNotification");
 const initializePayment = require("./initializePayment");
@@ -8,7 +7,6 @@ const trackEngagement = require("./trackEngagement");
 const updateStats = require("./updateStats");
 
 exports.getImageKitToken = getImageKitToken.getImageKitToken;
-exports.getProviderDetails = getProviderDetails.getProviderDetails;
 exports.getSubscriptionPrice = getSubscriptionPrice.getSubscriptionPrice;
 exports.createNotification = createNotification.createNotification;
 exports.initializePayment = initializePayment.initializePayment;
