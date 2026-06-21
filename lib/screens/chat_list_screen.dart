@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/image_optimizer.dart';
 
@@ -21,30 +19,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final uncached = userIds.where((id) => !_userCache.containsKey(id)).toList();
     if (uncached.isEmpty) return _userCache;
 
-    try {
-      final idToken = await _currentUser!.getIdToken();
-      final response = await http.post(
-        Uri.parse(
-            'https://us-central1-gigs-court.cloudfunctions.net/getProviderDetails'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({'userIds': uncached}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final results = data['results'] as Map<String, dynamic>;
-        for (final id in uncached) {
-          final fireData = results[id] as Map<String, dynamic>?;
-          final userData = fireData?['user'] as Map<String, dynamic>?;
-          if (userData != null) {
-            _userCache[id] = userData;
-          }
-        }
+    // Fetch directly from Firestore in parallel
+    final futures = uncached.map((id) => 
+      FirebaseFirestore.instance.collection('users').doc(id).get()
+    ).toList();
+    
+    final docs = await Future.wait(futures);
+    
+    for (int i = 0; i < uncached.length; i++) {
+      final doc = docs[i];
+      if (doc.exists) {
+        _userCache[uncached[i]] = doc.data()!;
       }
-    } catch (_) {}
+    }
 
     return _userCache;
   }
@@ -87,7 +74,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
             );
           }
 
-          // Collect all other user IDs
           final otherUserIds = <String>{};
           for (final chat in chats) {
             final data = chat.data() as Map<String, dynamic>;
@@ -99,7 +85,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
             if (otherId.isNotEmpty) otherUserIds.add(otherId);
           }
 
-          // Fetch all users in one batch
           return FutureBuilder<Map<String, Map<String, dynamic>>>(
             future: _fetchUsers(otherUserIds.toList()),
             builder: (context, userSnapshot) {

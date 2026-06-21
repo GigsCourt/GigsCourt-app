@@ -5,6 +5,7 @@ import 'home_screen.dart';
 import 'search_screen.dart';
 import 'chat_list_screen.dart';
 import 'profile_screen.dart';
+import 'admin_screen.dart';
 import '../theme/app_theme.dart';
 
 class MainShell extends StatefulWidget {
@@ -22,9 +23,7 @@ class _MainShellState extends State<MainShell> {
     const SearchScreen(),
     const ChatListScreen(),
     const ProfileScreen(),
-    const Scaffold(
-      body: Center(child: Text('Admin')),
-    ),
+    const AdminScreen(),
   ];
 
   @override

@@ -38,6 +38,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
     _scrollController.addListener(_onScroll);
     _getLocationAndLoadProviders();
+    // Fallback: if loading takes more than 10 seconds, show empty state
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    });
   }
 
   @override
@@ -57,9 +63,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _getLocationAndLoadProviders() async {
     try {
-      final permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission();
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        setState(() => _isLoading = false);
+        return;
       }
 
       final position = await Geolocator.getCurrentPosition(
@@ -123,7 +134,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // Fetch all user data in parallel
       final userFutures = filteredUsers.map((supa) {
         final id = supa['user_id'] as String;
         return FirebaseFirestore.instance.collection('users').doc(id).get();
@@ -182,13 +192,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         CacheService.set('service_names', serviceNames, ttl: const Duration(hours: 24));
       }
-
-      debugPrint('Service names loaded: ${serviceNames.length}');
-
-      if (providersRaw.isNotEmpty) {
-    debugPrint('First provider serviceIds: ${providersRaw.first['serviceIds']}');
-    debugPrint('First provider names: ${(providersRaw.first['serviceIds'] as List<int>).map((id) => serviceNames[id] ?? id.toString()).toList()}');
-}
 
       final providers = providersRaw.map((p) {
         final names = (p['serviceIds'] as List<int>)

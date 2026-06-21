@@ -120,7 +120,6 @@ class _SearchScreenState extends State<SearchScreen> {
         return;
       }
 
-      // Fetch all user data in parallel
       final userFutures = nearbyUsers.map((supa) {
         final id = supa['user_id'] as String;
         return FirebaseFirestore.instance.collection('users').doc(id).get();
@@ -154,6 +153,8 @@ class _SearchScreenState extends State<SearchScreen> {
           'rating': (userData['averageRating'] ?? 0.0).toDouble(),
           'reviewCount': userData['reviewCount'] ?? 0,
           'distanceKm': (supa['distance_meters'] as num) / 1000.0,
+          'latitude': supa['latitude'],
+          'longitude': supa['longitude'],
           'lastReviewedAt': userData['lastReviewedAt'],
         });
       }
@@ -365,8 +366,13 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         MarkerLayer(
           markers: _providers.map((provider) {
+            final lat = provider['latitude'] as double?;
+            final lng = provider['longitude'] as double?;
             return Marker(
-              point: LatLng(_userLat!, _userLng!),
+              point: LatLng(
+                lat ?? _userLat!,
+                lng ?? _userLng!,
+              ),
               width: 36, height: 36,
               child: GestureDetector(
                 onTap: () => _handleProviderTap(provider),
