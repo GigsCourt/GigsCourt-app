@@ -38,12 +38,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
     _scrollController.addListener(_onScroll);
     _getLocationAndLoadProviders();
-    // Fallback: if loading takes more than 10 seconds, show empty state
-    Future.delayed(const Duration(seconds: 10), () {
-      if (mounted && _isLoading) {
-        setState(() => _isLoading = false);
-      }
-    });
   }
 
   @override
@@ -61,7 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _getLocationAndLoadProviders() async {
+Future<void> _getLocationAndLoadProviders() async {
     try {
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -73,15 +67,37 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      // 1. Show last known position immediately
+      final lastPosition = await Geolocator.getLastKnownPosition();
+      if (lastPosition != null) {
+        _userLat = lastPosition.latitude;
+        _userLng = lastPosition.longitude;
+        await _loadProviders();
+      }
 
-      _userLat = position.latitude;
-      _userLng = position.longitude;
+      // 2. Get fresh GPS in background
+      try {
+        final freshPosition = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        ).timeout(const Duration(seconds: 5));
 
-      await _loadProviders();
+        // Only reload if position changed significantly
+        if (_userLat == null ||
+            (freshPosition.latitude - _userLat!).abs() > 0.001 ||
+            (freshPosition.longitude - _userLng!).abs() > 0.001) {
+          _userLat = freshPosition.latitude;
+          _userLng = freshPosition.longitude;
+          await _loadProviders();
+        }
+      } catch (_) {
+        // Fresh GPS failed, but we already loaded with last known position
+        if (_userLat == null) {
+          setState(() => _isLoading = false);
+          return;
+        }
+      }
 
+      // 3. Listen for significant movement
       _locationSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
