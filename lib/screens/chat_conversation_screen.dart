@@ -1,7 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../services/image_optimizer.dart';
+import '../services/imagekit_service.dart';
 
 class ChatConversationScreen extends StatefulWidget {
   final String chatId;
@@ -23,46 +32,25 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   final _messageController = TextEditingController();
   final _currentUser = FirebaseAuth.instance.currentUser;
   final _scrollController = ScrollController();
+  final _picker = ImagePicker();
+  final _audioRecorder = AudioRecorder();
+  final _audioPlayer = AudioPlayer();
+  bool _isUploading = false;
+  bool _isRecording = false;
+  bool _isTyping = false;
+  Timer? _typingTimer;
+  String? _playingVoiceUrl;
+  bool _isPlaying = false;
+  double _playbackSpeed = 1.0;
 
-  Future<void> _sendMessage() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty || _currentUser == null) return;
-
-    _messageController.clear();
-
-    final messageData = {
-      'senderId': _currentUser.uid,
-      'text': text,
-      'type': 'text',
-      'createdAt': FieldValue.serverTimestamp(),
-      'readAt': null,
-    };
-
-    await FirebaseFirestore.instance
-        .collection('chats')
-        .doc(widget.chatId)
-        .collection('messages')
-        .add(messageData);
-
-    await FirebaseFirestore.instance
-        .collection('chats')
-        .doc(widget.chatId)
-        .update({
-      'lastMessage': text,
-      'lastMessageAt': FieldValue.serverTimestamp(),
-    });
-
-    _scrollToBottom();
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+  @override
+  void initState() {
+    super.initState();
+    _listenToTyping();
+    _markMessagesAsRead();
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() => _isPlaying = state == PlayerState.playing);
       }
     });
   }
@@ -71,7 +59,220 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _typingTimer?.cancel();
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
     super.dispose();
+  }
+
+  void _listenToTyping() {
+    _messageController.addListener(() {
+      if (_messageController.text.isNotEmpty && !_isTyping) {
+        _setTyping(true);
+      } else if (_messageController.text.isEmpty && _isTyping) {
+        _setTyping(false);
+      }
+    });
+  }
+
+  Future<void> _setTyping(bool value) async {
+    _isTyping = value;
+    await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).update({
+      'typing_${_currentUser!.uid}': value,
+    });
+    if (value) {
+      _typingTimer?.cancel();
+      _typingTimer = Timer(const Duration(seconds: 3), () {
+        if (_isTyping) _setTyping(false);
+      });
+    }
+  }
+
+  Future<void> _markMessagesAsRead() async {
+    final unreadMessages = await FirebaseFirestore.instance
+        .collection('chats').doc(widget.chatId).collection('messages')
+        .where('senderId', isEqualTo: widget.otherUserId)
+        .where('readAt', isEqualTo: null).get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in unreadMessages.docs) {
+      batch.update(doc.reference, {'readAt': FieldValue.serverTimestamp()});
+    }
+    await batch.commit();
+  }
+
+  Future<void> _sendMessage({String? text, String? photoUrl, String? voiceUrl, int? voiceDuration}) async {
+    if (_currentUser == null) return;
+    if (text == null && photoUrl == null && voiceUrl == null) return;
+    if (text != null) {
+      _messageController.clear();
+      _setTyping(false);
+    }
+    String type = 'text';
+    if (photoUrl != null) type = 'photo';
+    if (voiceUrl != null) type = 'voice';
+
+    final messageData = {
+      'senderId': _currentUser.uid,
+      'text': text ?? '',
+      'photoUrl': photoUrl,
+      'voiceUrl': voiceUrl,
+      'voiceDuration': voiceDuration,
+      'type': type,
+      'createdAt': FieldValue.serverTimestamp(),
+      'readAt': null,
+    };
+    await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).collection('messages').add(messageData);
+
+    String lastMessage = text ?? '';
+    if (photoUrl != null) lastMessage = '📷 Photo';
+    if (voiceUrl != null) lastMessage = '🎤 Voice note';
+    await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).update({
+      'lastMessage': lastMessage,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _pickAndSendPhoto() async {
+    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+    setState(() => _isUploading = true);
+    final result = await ImageKitService.uploadImage(File(picked.path), 'chat_${DateTime.now().millisecondsSinceEpoch}');
+    if (mounted) {
+      setState(() => _isUploading = false);
+      if (result['success'] == true) {
+        await _sendMessage(photoUrl: result['url']);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send photo.')));
+      }
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (!await _audioRecorder.hasPermission()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone permission required.')));
+      return;
+    }
+    setState(() => _isRecording = true);
+   final tempDir = Directory.systemTemp;
+final filePath = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+await _audioRecorder.start(RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 22050), path: filePath);
+  }
+
+  Future<void> _stopRecording() async {
+    final path = await _audioRecorder.stop();
+    if (mounted) setState(() => _isRecording = false);
+    if (path == null) return;
+
+    setState(() => _isUploading = true);
+    final result = await ImageKitService.uploadImage(
+      File(path),
+      'voice_${DateTime.now().millisecondsSinceEpoch}',
+    );
+    if (mounted) {
+      setState(() => _isUploading = false);
+      if (result['success'] == true) {
+        // Estimate duration from file size (rough: ~8KB per second for AAC)
+        final file = File(path);
+        final fileSize = await file.length();
+        final estimatedSeconds = (fileSize / 8000).round();
+        await _sendMessage(voiceUrl: result['url'], voiceDuration: estimatedSeconds);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to send voice note.')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _playVoice(String url) async {
+    if (_isPlaying && _playingVoiceUrl == url) {
+      await _audioPlayer.pause();
+    } else if (_playingVoiceUrl == url && !_isPlaying) {
+      await _audioPlayer.resume();
+    } else {
+      await _audioPlayer.stop();
+      await _audioPlayer.play(UrlSource(url));
+      _playingVoiceUrl = url;
+    }
+    await _audioPlayer.setPlaybackRate(_playbackSpeed);
+  }
+
+  void _cycleSpeed() {
+    setState(() {
+      if (_playbackSpeed >= 2.0) {
+        _playbackSpeed = 0.5;
+      } else if (_playbackSpeed >= 1.5) {
+        _playbackSpeed = 2.0;
+      } else if (_playbackSpeed >= 1.0) {
+        _playbackSpeed = 1.5;
+      } else {
+        _playbackSpeed = 1.0;
+      }
+    });
+    _audioPlayer.setPlaybackRate(_playbackSpeed);
+  }
+
+  Future<void> _showReviewDialog() async {
+    int rating = 0;
+    final commentController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: const Text('Rate & Review', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (index) => IconButton(
+              icon: Icon(index < rating ? Icons.star : Icons.star_border, color: AppColors.accent, size: 36),
+              onPressed: () => setDialogState(() => rating = index + 1),
+            ))),
+            const SizedBox(height: 12),
+            TextField(controller: commentController, maxLines: 3, decoration: InputDecoration(hintText: 'Share your experience (optional)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(fontFamily: 'Inter'))),
+            TextButton(onPressed: () { if (rating > 0) Navigator.pop(ctx, true); }, child: const Text('Submit', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600))),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true && rating > 0) {
+      final existingReview = await FirebaseFirestore.instance.collection('reviews')
+          .where('providerId', isEqualTo: widget.otherUserId)
+          .where('clientId', isEqualTo: _currentUser!.uid).get();
+      if (existingReview.docs.isNotEmpty) {
+        await existingReview.docs.first.reference.update({'rating': rating, 'comment': commentController.text.trim(), 'createdAt': FieldValue.serverTimestamp()});
+      } else {
+        await FirebaseFirestore.instance.collection('reviews').add({
+          'providerId': widget.otherUserId, 'clientId': _currentUser.uid, 'rating': rating, 'comment': commentController.text.trim(), 'createdAt': FieldValue.serverTimestamp(),
+        });
+        try {
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            final idToken = await user.getIdToken();
+            await http.post(Uri.parse('https://us-central1-gigs-court.cloudfunctions.net/trackEngagement'),
+              headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $idToken'},
+              body: jsonEncode({'providerId': widget.otherUserId, 'type': 'review'}));
+          }
+        } catch (_) {}
+      }
+      final allReviews = await FirebaseFirestore.instance.collection('reviews').where('providerId', isEqualTo: widget.otherUserId).get();
+      double totalRating = 0;
+      for (final doc in allReviews.docs) { totalRating += (doc.data()['rating'] as num).toDouble(); }
+      final avgRating = allReviews.docs.isEmpty ? 0.0 : totalRating / allReviews.docs.length;
+      await FirebaseFirestore.instance.collection('users').doc(widget.otherUserId).update({'averageRating': avgRating, 'reviewCount': allReviews.docs.length, 'lastReviewedAt': FieldValue.serverTimestamp()});
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Review submitted. Thank you!')));
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    });
   }
 
   @override
@@ -80,126 +281,213 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        title: Text(widget.otherUserName,
-            style: const TextStyle(
-                fontFamily: 'Inter', fontWeight: FontWeight.w600)),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(widget.chatId)
-                  .collection('messages')
-                  .orderBy('createdAt', descending: true)
-                  .limit(30)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final messages = snapshot.data!.docs;
-
-                if (messages.isEmpty) {
-                  return const Center(
-                    child: Text('No messages yet. Say hello!',
-                        style: TextStyle(
-                            fontFamily: 'Inter',
-                            color: AppColors.textSecondary)),
-                  );
-                }
-
-                return ListView.builder(
-                  reverse: true,
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message =
-                        messages[index].data() as Map<String, dynamic>;
-                    final isMine =
-                        message['senderId'] == _currentUser!.uid;
-                    final text = message['text'] ?? '';
-
-                    return Align(
-                      alignment: isMine
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
-                        constraints: BoxConstraints(
-                          maxWidth:
-                              MediaQuery.of(context).size.width * 0.75,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMine
-                              ? AppColors.primary
-                              : AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: isMine
-                              ? null
-                              : Border.all(
-                                  color:
-                                      AppColors.primary.withAlpha(20)),
-                        ),
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            color: isMine
-                                ? Colors.white
-                                : AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(widget.otherUserName, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16)),
+          StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).snapshots(),
+            builder: (context, snapshot) {
+              final data = snapshot.data?.data() as Map<String, dynamic>?;
+              return Text(data?['typing_${widget.otherUserId}'] == true ? 'typing...' : '', style: const TextStyle(fontFamily: 'Inter', fontSize: 11, color: Colors.white70));
+            },
           ),
-          // Message input
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              border: Border(
-                top: BorderSide(color: AppColors.primary.withAlpha(20)),
+        ]),
+        actions: [IconButton(icon: const Icon(Icons.star_outline), tooltip: 'Rate & Review', onPressed: _showReviewDialog)],
+      ),
+      body: Column(children: [
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).collection('messages').orderBy('createdAt', descending: true).limit(30).snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+              final messages = snapshot.data!.docs;
+              if (messages.isEmpty) return const Center(child: Text('No messages yet. Say hello!', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
+              return ListView.builder(
+                reverse: true, controller: _scrollController, padding: const EdgeInsets.all(16), itemCount: messages.length,
+                itemBuilder: (context, index) {
+                  final message = messages[index].data() as Map<String, dynamic>;
+                  final isMine = message['senderId'] == _currentUser?.uid;
+                  final type = message['type'] ?? 'text';
+                  final text = message['text'] ?? '';
+                  final photoUrl = message['photoUrl'];
+                  final voiceUrl = message['voiceUrl'];
+                  final voiceDuration = message['voiceDuration'] as int?;
+                  final readAt = message['readAt'];
+
+                  return Align(
+                    alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                      child: Column(crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
+                        if (type == 'photo' && photoUrl != null)
+                          GestureDetector(
+                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.black), body: Center(child: Image.network(ImageOptimizer.original(photoUrl)))))),
+                            child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(ImageOptimizer.medium(photoUrl, width: 300, height: 300), fit: BoxFit.cover)),
+                          )
+                        else if (type == 'voice' && voiceUrl != null)
+                          _VoiceBubble(
+                            voiceUrl: voiceUrl,
+                            voiceDuration: voiceDuration ?? 0,
+                            isMine: isMine,
+                            isPlaying: _isPlaying && _playingVoiceUrl == voiceUrl,
+                            playbackSpeed: _playbackSpeed,
+                            onPlay: () => _playVoice(voiceUrl),
+                            onSpeedCycle: _cycleSpeed,
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(color: isMine ? AppColors.primary : AppColors.surface, borderRadius: BorderRadius.circular(16), border: isMine ? null : Border.all(color: AppColors.primary.withAlpha(20))),
+                            child: Text(text, style: TextStyle(fontFamily: 'Inter', color: isMine ? Colors.white : AppColors.textPrimary)),
+                          ),
+                        if (isMine) ...[
+                          const SizedBox(height: 2),
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(_formatTime(message['createdAt'] as Timestamp?), style: const TextStyle(fontFamily: 'Inter', fontSize: 10, color: AppColors.textSecondary)),
+                            const SizedBox(width: 4),
+                            Icon(readAt != null ? Icons.done_all : Icons.done, size: 14, color: readAt != null ? AppColors.success : AppColors.textSecondary),
+                          ]),
+                        ],
+                      ]),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
+          decoration: BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.primary.withAlpha(20)))),
+          child: Row(children: [
+            if (_isUploading)
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)))
+            else ...[
+              IconButton(icon: const Icon(Icons.add_circle_outline, color: AppColors.primary), onPressed: _pickAndSendPhoto),
+              GestureDetector(
+                onLongPress: _startRecording,
+                onLongPressUp: _stopRecording,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: _isRecording ? AppColors.error.withAlpha(26) : Colors.transparent, borderRadius: BorderRadius.circular(24)),
+                  child: Icon(_isRecording ? Icons.mic : Icons.mic_none, color: _isRecording ? AppColors.error : AppColors.primary),
+                ),
+              ),
+            ],
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                decoration: InputDecoration(hintText: 'Type a message...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none), filled: true, fillColor: AppColors.background, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+                onSubmitted: (text) => _sendMessage(text: text),
               ),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: AppColors.background,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: _sendMessage,
-                  icon: const Icon(Icons.send_rounded,
-                      color: AppColors.primary),
-                ),
-              ],
+            const SizedBox(width: 8),
+            IconButton(onPressed: () => _sendMessage(text: _messageController.text), icon: const Icon(Icons.send_rounded, color: AppColors.primary)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  String _formatTime(Timestamp? timestamp) {
+    if (timestamp == null) return '';
+    final date = timestamp.toDate();
+    return '${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _VoiceBubble extends StatefulWidget {
+  final String voiceUrl;
+  final int voiceDuration;
+  final bool isMine;
+  final bool isPlaying;
+  final double playbackSpeed;
+  final VoidCallback onPlay;
+  final VoidCallback onSpeedCycle;
+
+  const _VoiceBubble({required this.voiceUrl, required this.voiceDuration, required this.isMine, required this.isPlaying, required this.playbackSpeed, required this.onPlay, required this.onSpeedCycle});
+
+  @override
+  State<_VoiceBubble> createState() => _VoiceBubbleState();
+}
+
+class _VoiceBubbleState extends State<_VoiceBubble> {
+  final _audioPlayer = AudioPlayer();
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = Duration(seconds: widget.voiceDuration);
+    _audioPlayer.onPositionChanged.listen((pos) {
+      if (mounted) setState(() => _position = pos);
+    });
+    _audioPlayer.onDurationChanged.listen((dur) {
+      if (mounted) setState(() => _duration = dur);
+    });
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _seekTo(double value) {
+    final target = Duration(milliseconds: (value * _duration.inMilliseconds).round());
+    _audioPlayer.seek(target);
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    return '${minutes.toString().padLeft(1, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = widget.isMine ? AppColors.primary : AppColors.surface;
+    final textColor = widget.isMine ? Colors.white : AppColors.textPrimary;
+    final progress = _duration.inMilliseconds > 0 ? _position.inMilliseconds / _duration.inMilliseconds : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(16), border: widget.isMine ? null : Border.all(color: AppColors.primary.withAlpha(20))),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          GestureDetector(
+            onTap: widget.onPlay,
+            child: Icon(widget.isPlaying ? Icons.pause : Icons.play_arrow, color: textColor, size: 24),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: GestureDetector(
+              onTapDown: (details) {
+                final box = context.findRenderObject() as RenderBox;
+                final localX = details.localPosition.dx;
+                final width = box.size.width - 56;
+                _seekTo((localX - 44) / width);
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(value: progress, backgroundColor: textColor.withAlpha(51), color: textColor, minHeight: 4),
+              ),
             ),
           ),
-        ],
-      ),
+          const SizedBox(width: 8),
+          Text(_formatDuration(_position), style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: textColor)),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: widget.onSpeedCycle,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: textColor.withAlpha(26), borderRadius: BorderRadius.circular(4)),
+              child: Text('${widget.playbackSpeed}x', style: TextStyle(fontFamily: 'Inter', fontSize: 10, fontWeight: FontWeight.w600, color: textColor)),
+            ),
+          ),
+        ]),
+      ]),
     );
   }
 }

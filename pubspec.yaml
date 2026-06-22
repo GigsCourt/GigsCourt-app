@@ -27,6 +27,9 @@ dependencies:
   url_launcher: ^6.3.2
   firebase_remote_config: ^6.5.2
   webview_flutter: ^4.14.0
+  record: ^7.1.0
+  audioplayers: ^6.7.1
+  supercluster: ^3.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

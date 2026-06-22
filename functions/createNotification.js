@@ -39,6 +39,29 @@ exports.createNotification = functions.https.onRequest(async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    // Send push notification
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      const userData = userDoc.data();
+      
+      if (userData && userData.fcmToken && userData.pushNotifications !== false) {
+        await admin.messaging().send({
+          token: userData.fcmToken,
+          notification: {
+            title: title,
+            body: body,
+          },
+          data: {
+            type: type || 'general',
+            referenceId: referenceId || '',
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          },
+        });
+      }
+    } catch (pushError) {
+      console.log('Push notification failed:', pushError);
+    }
+
     res.json({ success: true });
   } catch (e) {
     res.status(401).json({ error: 'Invalid token' });

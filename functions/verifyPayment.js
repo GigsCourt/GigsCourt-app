@@ -28,7 +28,7 @@ exports.verifyPayment = functions.https.onRequest(async (req, res) => {
       if (response.status && response.data.status === 'success') {
         const userId = response.data.metadata.userId;
         const admin = require("./admin");
-        await admin.firestore().collection('providers').doc(userId).update({
+        await admin.firestore().collection('users').doc(userId).update({
           subscriptionStatus: 'premium',
           subscriptionExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         });

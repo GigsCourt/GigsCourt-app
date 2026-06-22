@@ -65,6 +65,62 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.1"
+  audioplayers:
+    dependency: "direct main"
+    description:
+      name: audioplayers
+      sha256: f16640453cc47487b7de72a2b28d37c7df1ac97999849f4a46d92b1d2b0f093d
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.7.1"
+  audioplayers_android:
+    dependency: transitive
+    description:
+      name: audioplayers_android
+      sha256: "60a6728277228413a85755bd3ffd6fab98f6555608923813ce383b190a360605"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.2.1"
+  audioplayers_darwin:
+    dependency: transitive
+    description:
+      name: audioplayers_darwin
+      sha256: c994b3bb3a921e4904ac40e013fbc94488e824fd7c1de6326f549943b0b44a91
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.4.0"
+  audioplayers_linux:
+    dependency: transitive
+    description:
+      name: audioplayers_linux
+      sha256: f75bce1ce864170ef5e6a2c6a61cd3339e1a17ce11e99a25bae4474ea491d001
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.2.1"
+  audioplayers_platform_interface:
+    dependency: transitive
+    description:
+      name: audioplayers_platform_interface
+      sha256: "0e2f6a919ab56d0fec272e801abc07b26ae7f31980f912f24af4748763e5a656"
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.1.1"
+  audioplayers_web:
+    dependency: transitive
+    description:
+      name: audioplayers_web
+      sha256: "24a6f258062bd7da8cb2157e83fccb9816a08dd306cbaaa24f9813d071470545"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.2.1"
+  audioplayers_windows:
+    dependency: transitive
+    description:
+      name: audioplayers_windows
+      sha256: "95f875a96c88c3dbbcb608d4f8288e300b0113d256a81d0b3197fcc18f0dc91a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.3.1"
   boolean_selector:
     dependency: transitive
     description:
@@ -432,6 +488,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  freezed_annotation:
+    dependency: transitive
+    description:
+      name: freezed_annotation
+      sha256: "7294967ff0a6d98638e7acb774aac3af2550777accd8149c90af5b014e6d44d8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.0"
   functions_client:
     dependency: transitive
     description:
@@ -680,6 +744,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.1"
+  json_annotation:
+    dependency: transitive
+    description:
+      name: json_annotation
+      sha256: "2a743920d81b7910627f68ee2c9ac1fc0bfee32b9fc3403587d7c6791ca12f80"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.12.0"
   jwt_decode:
     dependency: transitive
     description:
@@ -688,6 +760,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.3.1"
+  kdbush:
+    dependency: transitive
+    description:
+      name: kdbush
+      sha256: "7dcc5376b1e579804f48428c309d0c9dd0c4c98a9f68db18e17ca1a04561e652"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.0"
   latlong2:
     dependency: "direct main"
     description:
@@ -936,6 +1016,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  rbush:
+    dependency: transitive
+    description:
+      name: rbush
+      sha256: "48b683421b4afb43a642f82c6aa31911e54f3069143d31c7d33cbe329df13403"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
   realtime_client:
     dependency: transitive
     description:
@@ -944,6 +1032,54 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.7.4"
+  record:
+    dependency: "direct main"
+    description:
+      name: record
+      sha256: d28ec249ee4af6753a68a7a5077d6a2eee71e38dc61a241724aded53263274ba
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.1.0"
+  record_android:
+    dependency: transitive
+    description:
+      name: record_android
+      sha256: "6722be803d8b2a0945112d69cfbda1391970c5cff2cb53c16afd307a6b7ef0c4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.1"
+  record_ios:
+    dependency: transitive
+    description:
+      name: record_ios
+      sha256: de6f660b02c2a909c963d5c3c929fdf100b03cea9e5552599d0e5ae1b7d1a89d
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  record_linux:
+    dependency: transitive
+    description:
+      name: record_linux
+      sha256: "305526af0560866a0cc4219aa3726ef8541f819e14bd5f65b73ffdb7dc5911be"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  record_macos:
+    dependency: transitive
+    description:
+      name: record_macos
+      sha256: "9c29a7efdace0662db2aa7284873d49f8b48992432db3b5f0d38cbe2da8eecde"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  record_platform_interface:
+    dependency: transitive
+    description:
+      name: record_platform_interface
+      sha256: d94b37cadb8fe203e64b0e9893271c0b71b34f2550ee7fb0c6105d650e00c1f5
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   record_use:
     dependency: transitive
     description:
@@ -952,6 +1088,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.6.0"
+  record_web:
+    dependency: transitive
+    description:
+      name: record_web
+      sha256: "9d2d43162afff63d8608eb09c2982b9c6898dd8fbf5b05395ca7d08305b6db40"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  record_windows:
+    dependency: transitive
+    description:
+      name: record_windows
+      sha256: a1db1c0b996acd4161a93cc412b81a2a09a4fd7161c6353f32bf97683003b52f
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   retry:
     dependency: transitive
     description:
@@ -1093,6 +1245,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.14.2"
+  supercluster:
+    dependency: "direct main"
+    description:
+      name: supercluster
+      sha256: c8cc88d27b43c045b5673e4ffc65b183615c6364bac3dcc42c2d75e1deed9a52
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.0"
+  synchronized:
+    dependency: transitive
+    description:
+      name: synchronized
+      sha256: "93b153dcb6a26dcddee6ca087dd634b53e38c10b5aa163e8e49501a776456153"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.4.1"
   term_glyph:
     dependency: transitive
     description:

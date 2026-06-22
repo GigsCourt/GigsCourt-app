@@ -32,7 +32,8 @@ class _SupportScreenState extends State<SupportScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      await FirebaseFirestore.instance.collection('support_tickets').add({
+      await FirebaseFirestore.instance.collection('tickets').add({
+        'type': 'support',
         'userId': user.uid,
         'subject': _subjectController.text.trim(),
         'message': _messageController.text.trim(),

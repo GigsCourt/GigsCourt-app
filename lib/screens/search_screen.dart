@@ -353,54 +353,142 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildMapView() {
     if (_userLat == null || _userLng == null) return const Center(child: CircularProgressIndicator());
 
+    final points = <Map<String, dynamic>>[];
+    for (final p in _providers) {
+      final lat = p['latitude'] as double?;
+      final lng = p['longitude'] as double?;
+      if (lat != null && lng != null) {
+        points.add({'lat': lat, 'lng': lng, 'provider': p});
+      }
+    }
+
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
         initialCenter: LatLng(_userLat!, _userLng!),
         initialZoom: _radiusToZoom(_radiusKm),
+        onMapEvent: (event) => setState(() {}),
       ),
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.gigscourt',
         ),
-        MarkerLayer(
-          markers: _providers.map((provider) {
-            final lat = provider['latitude'] as double?;
-            final lng = provider['longitude'] as double?;
-            return Marker(
-              point: LatLng(
-                lat ?? _userLat!,
-                lng ?? _userLng!,
+        MarkerLayer(markers: _buildClusteredMarkers(points)),
+      ],
+    );
+  }
+
+  List<Marker> _buildClusteredMarkers(List<Map<String, dynamic>> points) {
+    if (points.isEmpty) return [];
+
+    final zoom = _mapController.camera.zoom;
+    final markers = <Marker>[];
+
+    if (zoom >= 14 || points.length <= 3) {
+      for (final point in points) {
+        final p = point['provider'] as Map<String, dynamic>;
+        markers.add(Marker(
+          point: LatLng(point['lat'] as double, point['lng'] as double),
+          width: 36, height: 36,
+          child: GestureDetector(
+            onTap: () => _handleProviderTap(p),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
+                  width: 3,
+                ),
               ),
-              width: 36, height: 36,
-              child: GestureDetector(
-                onTap: () => _handleProviderTap(provider),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: provider['isOnline'] == true ? AppColors.success : Colors.transparent,
-                      width: 3,
-                    ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: p['photoUrl'] != null
+                    ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
+                    : Container(
+                        width: 30, height: 30,
+                        color: AppColors.primary.withAlpha(51),
+                        child: Icon(Icons.person, size: 16, color: AppColors.primary),
+                      ),
+              ),
+            ),
+          ),
+        ));
+      }
+    } else {
+      final clusterRadius = _getClusterRadius(zoom);
+      final clusters = <String, List<Map<String, dynamic>>>{};
+
+      for (final point in points) {
+        final lat = point['lat'] as double;
+final lng = point['lng'] as double;
+final latKey = (lat / clusterRadius).round();
+final lngKey = (lng / clusterRadius).round();
+        final key = '$latKey,$lngKey';
+        clusters.putIfAbsent(key, () => []);
+        clusters[key]!.add(point);
+      }
+
+      for (final entry in clusters.entries) {
+        final clusterPoints = entry.value;
+        if (clusterPoints.length == 1) {
+          final p = clusterPoints.first['provider'] as Map<String, dynamic>;
+          markers.add(Marker(
+            point: LatLng(clusterPoints.first['lat'] as double, clusterPoints.first['lng'] as double),
+            width: 36, height: 36,
+            child: GestureDetector(
+              onTap: () => _handleProviderTap(p),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
+                    width: 3,
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: provider['photoUrl'] != null
-                        ? Image.network(provider['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
-                        : Container(
-                            width: 30, height: 30,
-                            color: AppColors.primary.withAlpha(51),
-                            child: Icon(Icons.person, size: 16, color: AppColors.primary),
-                          ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: p['photoUrl'] != null
+                      ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
+                      : Container(
+                          width: 30, height: 30,
+                          color: AppColors.primary.withAlpha(51),
+                          child: Icon(Icons.person, size: 16, color: AppColors.primary),
+                        ),
+                ),
+              ),
+            ),
+          ));
+        } else {
+          final avgLat = clusterPoints.map((p) => p['lat'] as double).reduce((a, b) => a + b) / clusterPoints.length;
+          final avgLng = clusterPoints.map((p) => p['lng'] as double).reduce((a, b) => a + b) / clusterPoints.length;
+          markers.add(Marker(
+            point: LatLng(avgLat, avgLng),
+            width: 44, height: 44,
+            child: GestureDetector(
+              onTap: () => _mapController.move(LatLng(avgLat, avgLng), zoom + 2),
+              child: Container(
+                decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
+                child: Center(
+                  child: Text(
+                    '${clusterPoints.length}',
+                    style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white),
                   ),
                 ),
               ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
+            ),
+          ));
+        }
+      }
+    }
+    return markers;
+  }
+
+  double _getClusterRadius(double zoom) {
+    if (zoom <= 8) return 2.0;
+    if (zoom <= 10) return 1.0;
+    if (zoom <= 12) return 0.5;
+    return 0.1;
   }
 
   Widget _buildListView() {
