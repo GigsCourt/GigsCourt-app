@@ -164,12 +164,15 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     final providerRef = FirebaseFirestore.instance.collection('users').doc(widget.providerId);
 
     if (_isFollowing) {
-      await userRef.update({
-        'following': FieldValue.arrayRemove([widget.providerId]),
-      });
-      await providerRef.update({
-        'followerCount': FieldValue.increment(-1),
-      });
+  await userRef.update({
+    'following': FieldValue.arrayRemove([widget.providerId]),
+  });
+  final currentFollowerCount = (_userData?['followerCount'] ?? 1) as int;
+  if (currentFollowerCount > 0) {
+    await providerRef.update({
+      'followerCount': FieldValue.increment(-1),
+    });
+  }
     } else {
       await userRef.update({
         'following': FieldValue.arrayUnion([widget.providerId]),

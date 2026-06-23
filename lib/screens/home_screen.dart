@@ -184,6 +184,7 @@ Future<void> _getLocationAndLoadProviders() async {
           'reviewCount': userData['reviewCount'] ?? 0,
           'distanceKm': (supa['distance_meters'] as num) / 1000.0,
           'lastReviewedAt': userData['lastReviewedAt'],
+          'lastSeen': _formatLastSeen(userData['lastSeen']),
         });
       }
 
@@ -241,6 +242,18 @@ Future<void> _getLocationAndLoadProviders() async {
       setState(() => _isLoading = false);
     }
   }
+
+String? _formatLastSeen(dynamic lastSeen) {
+  if (lastSeen == null) return null;
+  final date = (lastSeen as Timestamp).toDate();
+  final diff = DateTime.now().difference(date);
+  if (diff.inMinutes < 1) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  return '${diff.inDays ~/ 7}w ago';
+}
+
 
   void _handleProviderTap(Map<String, dynamic> provider) {
     if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
@@ -352,7 +365,7 @@ Future<void> _getLocationAndLoadProviders() async {
                     controller: _scrollController,
                     padding: const EdgeInsets.all(16),
                     children: [
-                      if (_featuredProviders.isNotEmpty) ...[
+                      if (!_isEarlyAccess && _featuredProviders.isNotEmpty) ...[
                         _buildSectionHeader('Featured'),
                         const SizedBox(height: 12),
                         SizedBox(
@@ -367,7 +380,9 @@ Future<void> _getLocationAndLoadProviders() async {
                                 isVerified: p['isVerified'], isOnline: p['isOnline'],
                                 services: List<String>.from(p['services']),
                                 rating: p['rating'], reviewCount: p['reviewCount'],
-                                distanceKm: p['distanceKm'], isHorizontal: true,
+                                distanceKm: p['distanceKm'],
+lastSeen: p['lastSeen'],
+isHorizontal: true,
                                 onTap: () => _handleProviderTap(p),
                               );
                             },
@@ -398,6 +413,7 @@ Future<void> _getLocationAndLoadProviders() async {
                               isVerified: p['isVerified'], isOnline: p['isOnline'],
                               services: List<String>.from(p['services']),
                               rating: p['rating'], reviewCount: p['reviewCount'],
+                              lastSeen: p['lastSeen'],
                               distanceKm: p['distanceKm'],
                               onTap: () => _handleProviderTap(p),
                             );

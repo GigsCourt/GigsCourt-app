@@ -48,8 +48,12 @@ void main() async {
   });
   await remoteConfig.fetchAndActivate();
 
-  // Initialize FCM
-  await _initFCM();
+  // Initialize FCM (works on iOS/Android only)
+  try {
+    await _initFCM();
+  } catch (_) {
+    // FCM not supported on this platform
+  }
 
   runApp(const GigsCourtApp());
 }
@@ -57,14 +61,12 @@ void main() async {
 Future<void> _initFCM() async {
   final messaging = FirebaseMessaging.instance;
 
-  // Request permission
   await messaging.requestPermission(
     alert: true,
     badge: true,
     sound: true,
   );
 
-  // Get token and save to Firestore
   final token = await messaging.getToken();
   if (token != null) {
     final user = FirebaseAuth.instance.currentUser;
@@ -74,7 +76,6 @@ Future<void> _initFCM() async {
       });
     }
 
-    // Listen for token refresh
     messaging.onTokenRefresh.listen((newToken) async {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
@@ -85,18 +86,15 @@ Future<void> _initFCM() async {
     });
   }
 
-  // Handle notification tap when app is in background
   FirebaseMessaging.onMessageOpenedApp.listen((message) {
     _handleNotificationTap(message.data);
   });
 
-  // Handle notification tap when app was terminated
   final initialMessage = await messaging.getInitialMessage();
   if (initialMessage != null) {
     _handleNotificationTap(initialMessage.data);
   }
 
-  // Handle foreground messages
   FirebaseMessaging.onMessage.listen((message) {
     // Show local notification or in-app banner
   });

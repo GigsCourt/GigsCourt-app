@@ -156,6 +156,7 @@ class _SearchScreenState extends State<SearchScreen> {
           'latitude': supa['latitude'],
           'longitude': supa['longitude'],
           'lastReviewedAt': userData['lastReviewedAt'],
+          'lastSeen': _formatLastSeen(userData['lastSeen']),
         });
       }
 
@@ -212,6 +213,17 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _isLoading = false);
     }
   }
+
+String? _formatLastSeen(dynamic lastSeen) {
+  if (lastSeen == null) return null;
+  final date = (lastSeen as Timestamp).toDate();
+  final diff = DateTime.now().difference(date);
+  if (diff.inMinutes < 1) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  return '${diff.inDays ~/ 7}w ago';
+}
 
   void _handleProviderTap(Map<String, dynamic> provider) {
     if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
@@ -516,6 +528,7 @@ final lngKey = (lng / clusterRadius).round();
           rating: p['rating'],
           reviewCount: p['reviewCount'],
           distanceKm: p['distanceKm'],
+          lastSeen: p['lastSeen'],
           onTap: () => _handleProviderTap(p),
         );
       },

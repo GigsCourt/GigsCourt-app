@@ -104,11 +104,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }),
           const SizedBox(height: 20),
           _buildTile(Icons.logout, 'Log Out', onTap: () async {
-            await FirebaseAuth.instance.signOut();
-            if (context.mounted) {
-              Navigator.of(context).pushNamedAndRemoveUntil('/splash', (route) => false);
-            }
-          }),
+  final user = FirebaseAuth.instance.currentUser;
+  if (user != null) {
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+      'isOnline': false,
+      'lastSeen': FieldValue.serverTimestamp(),
+    });
+  }
+  await FirebaseAuth.instance.signOut();
+  if (context.mounted) {
+    Navigator.of(context).pushNamedAndRemoveUntil('/splash', (route) => false);
+  }
+}),
           const SizedBox(height: 12),
           _buildTile(Icons.delete_outline, 'Delete Account', color: AppColors.error, onTap: () {
             _showDeleteDialog(context);
