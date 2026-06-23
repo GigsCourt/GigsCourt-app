@@ -55,7 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-Future<void> _getLocationAndLoadProviders() async {
+  Future<void> _getLocationAndLoadProviders() async {
     try {
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -243,17 +243,16 @@ Future<void> _getLocationAndLoadProviders() async {
     }
   }
 
-String? _formatLastSeen(dynamic lastSeen) {
-  if (lastSeen == null) return null;
-  final date = (lastSeen as Timestamp).toDate();
-  final diff = DateTime.now().difference(date);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays}d ago';
-  return '${diff.inDays ~/ 7}w ago';
-}
-
+  String? _formatLastSeen(dynamic lastSeen) {
+    if (lastSeen == null) return null;
+    final date = (lastSeen as Timestamp).toDate();
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${diff.inDays ~/ 7}w ago';
+  }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
     if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
@@ -303,8 +302,14 @@ String? _formatLastSeen(dynamic lastSeen) {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('GigsCourt',
-                style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 20)),
+            const Text(
+              'GigsCourt',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+              ),
+            ),
             if (_isEarlyAccess) ...[
               const SizedBox(width: 8),
               Container(
@@ -313,8 +318,14 @@ String? _formatLastSeen(dynamic lastSeen) {
                   color: Colors.white.withAlpha(40),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('Early Access',
-                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.white)),
+                child: const Text(
+                  'Early Access',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 10,
+                    color: Colors.white,
+                  ),
+                ),
               ),
             ],
           ],
@@ -336,14 +347,25 @@ String? _formatLastSeen(dynamic lastSeen) {
                   ),
                   if (count > 0)
                     Positioned(
-                      right: 8, top: 8,
+                      right: 8,
+                      top: 8,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle),
-                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        decoration: const BoxDecoration(
+                          color: AppColors.error,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
                         child: Text(
                           count > 99 ? '99+' : '$count',
-                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -357,78 +379,60 @@ String? _formatLastSeen(dynamic lastSeen) {
       body: Stack(
         children: [
           _isLoading && _allProviders.isEmpty
-              ? _buildSkeletonGrid()
+              ? _buildSkeletonGrid(context)
               : RefreshIndicator(
                   onRefresh: _refresh,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (!_isEarlyAccess && _featuredProviders.isNotEmpty) ...[
-                        _buildSectionHeader('Featured'),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 110,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _featuredProviders.length,
-                            itemBuilder: (context, index) {
-                              final p = _featuredProviders[index];
-                              return ProviderCard(
-                                name: p['name'], photoUrl: p['photoUrl'],
-                                isVerified: p['isVerified'], isOnline: p['isOnline'],
-                                services: List<String>.from(p['services']),
-                                rating: p['rating'], reviewCount: p['reviewCount'],
-                                distanceKm: p['distanceKm'],
-lastSeen: p['lastSeen'],
-isHorizontal: true,
-                                onTap: () => _handleProviderTap(p),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-                      _buildSectionHeader('All Providers'),
-                      const SizedBox(height: 12),
-                      if (_allProviders.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(32),
-                          child: Text('No providers found nearby.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
-                        )
-                      else
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
-                          itemCount: _allProviders.length,
-                          itemBuilder: (context, index) {
-                            final p = _allProviders[index];
-                            return ProviderCard(
-                              name: p['name'], photoUrl: p['photoUrl'],
-                              isVerified: p['isVerified'], isOnline: p['isOnline'],
-                              services: List<String>.from(p['services']),
-                              rating: p['rating'], reviewCount: p['reviewCount'],
-                              lastSeen: p['lastSeen'],
-                              distanceKm: p['distanceKm'],
-                              onTap: () => _handleProviderTap(p),
-                            );
-                          },
-                        ),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          // Featured Section
+                          if (!_isEarlyAccess && _featuredProviders.isNotEmpty) ...[
+                            _buildSectionHeader('Featured'),
+                            const SizedBox(height: 12),
+                            _buildFeaturedSection(context),
+                            const SizedBox(height: 24),
+                          ],
+                          // All Providers Section
+                          _buildSectionHeader('All Providers'),
+                          const SizedBox(height: 12),
+                          if (_allProviders.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(32),
+                              child: Text(
+                                'No providers found nearby.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            )
+                          else
+                            _buildProviderGrid(context, constraints),
+                        ],
+                      );
+                    },
                   ),
                 ),
           if (_showScrollToTop)
             Positioned(
-              bottom: 20, right: 20,
+              bottom: 20,
+              right: 20,
               child: FloatingActionButton.small(
-                onPressed: () => _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut),
+                onPressed: () => _scrollController.animateTo(
+                  0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                ),
                 backgroundColor: AppColors.primary,
-                child: const Icon(Icons.keyboard_arrow_up, color: Colors.white),
+                child: const Icon(
+                  Icons.keyboard_arrow_up,
+                  color: Colors.white,
+                ),
               ),
             ),
         ],
@@ -436,7 +440,107 @@ isHorizontal: true,
     );
   }
 
-  Widget _buildSkeletonGrid() {
+  // ========== RESPONSIVE GRID ==========
+
+  int _getCrossAxisCount(double screenWidth) {
+    if (screenWidth < 600) {
+      return 2; // Phones
+    } else if (screenWidth < 900) {
+      return 3; // Small tablets
+    } else {
+      return 4; // Large tablets
+    }
+  }
+
+  double _getAspectRatio(double screenWidth) {
+    if (screenWidth < 600) {
+      return 0.72; // Phones (same as before)
+    } else if (screenWidth < 900) {
+      return 0.70; // Small tablets
+    } else {
+      return 0.68; // Large tablets (wider cards)
+    }
+  }
+
+  double _getCardSpacing(double screenWidth) {
+    if (screenWidth < 600) {
+      return 12.0; // Phones
+    } else {
+      return 16.0; // Tablets (more spacing)
+    }
+  }
+
+  // ========== BUILDER WIDGETS ==========
+
+  Widget _buildFeaturedSection(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cardHeight = screenWidth < 600 ? 110.0 : 130.0;
+
+    return SizedBox(
+      height: cardHeight,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _featuredProviders.length,
+        itemBuilder: (context, index) {
+          final p = _featuredProviders[index];
+          return ProviderCard(
+            name: p['name'],
+            photoUrl: p['photoUrl'],
+            isVerified: p['isVerified'],
+            isOnline: p['isOnline'],
+            services: List<String>.from(p['services']),
+            rating: p['rating'],
+            reviewCount: p['reviewCount'],
+            distanceKm: p['distanceKm'],
+            lastSeen: p['lastSeen'],
+            isHorizontal: true,
+            onTap: () => _handleProviderTap(p),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildProviderGrid(BuildContext context, BoxConstraints constraints) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final crossAxisCount = _getCrossAxisCount(screenWidth);
+    final aspectRatio = _getAspectRatio(screenWidth);
+    final spacing = _getCardSpacing(screenWidth);
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: aspectRatio,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+      ),
+      itemCount: _allProviders.length,
+      itemBuilder: (context, index) {
+        final p = _allProviders[index];
+        return ProviderCard(
+          name: p['name'],
+          photoUrl: p['photoUrl'],
+          isVerified: p['isVerified'],
+          isOnline: p['isOnline'],
+          services: List<String>.from(p['services']),
+          rating: p['rating'],
+          reviewCount: p['reviewCount'],
+          lastSeen: p['lastSeen'],
+          distanceKm: p['distanceKm'],
+          onTap: () => _handleProviderTap(p),
+        );
+      },
+    );
+  }
+
+  Widget _buildSkeletonGrid(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final crossAxisCount = _getCrossAxisCount(screenWidth);
+    final spacing = _getCardSpacing(screenWidth);
+    final aspectRatio = _getAspectRatio(screenWidth);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -445,7 +549,8 @@ isHorizontal: true,
         SizedBox(
           height: 110,
           child: ListView.builder(
-            scrollDirection: Axis.horizontal, itemCount: 3,
+            scrollDirection: Axis.horizontal,
+            itemCount: 3,
             itemBuilder: (_, _) => const ProviderCardSkeleton(isHorizontal: true),
           ),
         ),
@@ -453,9 +558,14 @@ isHorizontal: true,
         const SkeletonLoader(width: 120, height: 18),
         const SizedBox(height: 12),
         GridView.builder(
-          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            childAspectRatio: aspectRatio,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+          ),
           itemCount: 6,
           itemBuilder: (_, _) => const ProviderCardSkeleton(),
         ),
@@ -464,7 +574,14 @@ isHorizontal: true,
   }
 
   Widget _buildSectionHeader(String title) {
-    return Text(title,
-        style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.textPrimary));
+    return Text(
+      title,
+      style: const TextStyle(
+        fontFamily: 'Inter',
+        fontWeight: FontWeight.w700,
+        fontSize: 18,
+        color: AppColors.textPrimary,
+      ),
+    );
   }
 }

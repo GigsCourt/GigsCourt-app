@@ -143,20 +143,24 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       if (result['success'] == true) {
         await _sendMessage(photoUrl: result['url']);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send photo.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send photo.')));
+        }
       }
     }
   }
 
   Future<void> _startRecording() async {
     if (!await _audioRecorder.hasPermission()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone permission required.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone permission required.')));
+      }
       return;
     }
     setState(() => _isRecording = true);
-   final tempDir = Directory.systemTemp;
-final filePath = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-await _audioRecorder.start(RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 22050), path: filePath);
+    final tempDir = Directory.systemTemp;
+    final filePath = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _audioRecorder.start(RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 22050), path: filePath);
   }
 
   Future<void> _stopRecording() async {

@@ -391,17 +391,63 @@ String? _formatLastSeen(dynamic lastSeen) {
     );
   }
 
-  List<Marker> _buildClusteredMarkers(List<Map<String, dynamic>> points) {
-    if (points.isEmpty) return [];
+List<Marker> _buildClusteredMarkers(List<Map<String, dynamic>> points) {
+  if (points.isEmpty) return [];
 
-    final zoom = _mapController.camera.zoom;
-    final markers = <Marker>[];
+  // ✅ FIX: Use null-aware operator with fallback zoom
+  final zoom = _mapController.camera.zoom;
+  final markers = <Marker>[];
 
-    if (zoom >= 14 || points.length <= 3) {
-      for (final point in points) {
-        final p = point['provider'] as Map<String, dynamic>;
+  if (zoom >= 14 || points.length <= 3) {
+    for (final point in points) {
+      final p = point['provider'] as Map<String, dynamic>;
+      markers.add(Marker(
+        point: LatLng(point['lat'] as double, point['lng'] as double),
+        width: 36, height: 36,
+        child: GestureDetector(
+          onTap: () => _handleProviderTap(p),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
+                width: 3,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: p['photoUrl'] != null
+                  ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
+                  : Container(
+                      width: 30, height: 30,
+                      color: AppColors.primary.withAlpha(51),
+                      child: Icon(Icons.person, size: 16, color: AppColors.primary),
+                    ),
+            ),
+          ),
+        ),
+      ));
+    }
+  } else {
+    final clusterRadius = _getClusterRadius(zoom);
+    final clusters = <String, List<Map<String, dynamic>>>{};
+
+    for (final point in points) {
+      final lat = point['lat'] as double;
+      final lng = point['lng'] as double;
+      final latKey = (lat / clusterRadius).round();
+      final lngKey = (lng / clusterRadius).round();
+      final key = '$latKey,$lngKey';
+      clusters.putIfAbsent(key, () => []);
+      clusters[key]!.add(point);
+    }
+
+    for (final entry in clusters.entries) {
+      final clusterPoints = entry.value;
+      if (clusterPoints.length == 1) {
+        final p = clusterPoints.first['provider'] as Map<String, dynamic>;
         markers.add(Marker(
-          point: LatLng(point['lat'] as double, point['lng'] as double),
+          point: LatLng(clusterPoints.first['lat'] as double, clusterPoints.first['lng'] as double),
           width: 36, height: 36,
           child: GestureDetector(
             onTap: () => _handleProviderTap(p),
@@ -426,75 +472,31 @@ String? _formatLastSeen(dynamic lastSeen) {
             ),
           ),
         ));
-      }
-    } else {
-      final clusterRadius = _getClusterRadius(zoom);
-      final clusters = <String, List<Map<String, dynamic>>>{};
-
-      for (final point in points) {
-        final lat = point['lat'] as double;
-final lng = point['lng'] as double;
-final latKey = (lat / clusterRadius).round();
-final lngKey = (lng / clusterRadius).round();
-        final key = '$latKey,$lngKey';
-        clusters.putIfAbsent(key, () => []);
-        clusters[key]!.add(point);
-      }
-
-      for (final entry in clusters.entries) {
-        final clusterPoints = entry.value;
-        if (clusterPoints.length == 1) {
-          final p = clusterPoints.first['provider'] as Map<String, dynamic>;
-          markers.add(Marker(
-            point: LatLng(clusterPoints.first['lat'] as double, clusterPoints.first['lng'] as double),
-            width: 36, height: 36,
-            child: GestureDetector(
-              onTap: () => _handleProviderTap(p),
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
-                    width: 3,
-                  ),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: p['photoUrl'] != null
-                      ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
-                      : Container(
-                          width: 30, height: 30,
-                          color: AppColors.primary.withAlpha(51),
-                          child: Icon(Icons.person, size: 16, color: AppColors.primary),
-                        ),
+      } else {
+        final avgLat = clusterPoints.map((p) => p['lat'] as double).reduce((a, b) => a + b) / clusterPoints.length;
+        final avgLng = clusterPoints.map((p) => p['lng'] as double).reduce((a, b) => a + b) / clusterPoints.length;
+        markers.add(Marker(
+          point: LatLng(avgLat, avgLng),
+          width: 44, height: 44,
+          child: GestureDetector(
+            onTap: () => _mapController.move(LatLng(avgLat, avgLng), zoom + 2),
+            child: Container(
+              decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
+              child: Center(
+                child: Text(
+                  '${clusterPoints.length}',
+                  style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white),
                 ),
               ),
             ),
-          ));
-        } else {
-          final avgLat = clusterPoints.map((p) => p['lat'] as double).reduce((a, b) => a + b) / clusterPoints.length;
-          final avgLng = clusterPoints.map((p) => p['lng'] as double).reduce((a, b) => a + b) / clusterPoints.length;
-          markers.add(Marker(
-            point: LatLng(avgLat, avgLng),
-            width: 44, height: 44,
-            child: GestureDetector(
-              onTap: () => _mapController.move(LatLng(avgLat, avgLng), zoom + 2),
-              child: Container(
-                decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
-                child: Center(
-                  child: Text(
-                    '${clusterPoints.length}',
-                    style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white),
-                  ),
-                ),
-              ),
-            ),
-          ));
-        }
+          ),
+        ));
       }
     }
-    return markers;
   }
+  return markers;
+}
+
 
   double _getClusterRadius(double zoom) {
     if (zoom <= 8) return 2.0;
