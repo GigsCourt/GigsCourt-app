@@ -188,36 +188,104 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() {});
   }
 
+  // ========== TICKETS (UPDATED TO USE SUB-COLLECTIONS) ==========
+
   Widget _buildTickets() {
+    // Since tickets are now in sub-collections per user, we need to query all users' tickets
+    // For admin view, we'll use a collection group query
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('tickets').orderBy('createdAt', descending: true).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collectionGroup('tickets')
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final tickets = snapshot.data!.docs;
-        if (tickets.isEmpty) return const Center(child: Text('No tickets.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)));
+        if (tickets.isEmpty) {
+          return const Center(
+            child: Text('No tickets.', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
+          );
+        }
         return ListView.builder(
-          padding: const EdgeInsets.all(16), itemCount: tickets.length,
+          padding: const EdgeInsets.all(16),
+          itemCount: tickets.length,
           itemBuilder: (context, index) {
             final data = tickets[index].data() as Map<String, dynamic>;
             final type = data['type'] ?? 'report';
+            final ticketId = tickets[index].id;
+            final userId = tickets[index].reference.parent.parent!.id; // Get userId from path
+
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.primary.withAlpha(20))),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: AppColors.primary.withAlpha(26), borderRadius: BorderRadius.circular(4)), child: Text(type, style: const TextStyle(fontFamily: 'Inter', fontSize: 10, color: AppColors.primary))),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(data['subject'] ?? '', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 14))),
-                  _buildStatusBadge(data['status'] ?? 'pending'),
-                ]),
-                if (data['message'] != null && (data['message'] as String).isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(data['message'], style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.primary.withAlpha(20)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withAlpha(26),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          type,
+                          style: const TextStyle(fontFamily: 'Inter', fontSize: 10, color: AppColors.primary),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          data['subject'] ?? '',
+                          style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 14),
+                        ),
+                      ),
+                      _buildStatusBadge(data['status'] ?? 'pending'),
+                    ],
+                  ),
+                  if (data['message'] != null && (data['message'] as String).isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      data['message'],
+                      style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'User: $userId',
+                        style: const TextStyle(fontFamily: 'Inter', fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          // Update ticket status in sub-collection
+                          await FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(userId)
+                              .collection('tickets')
+                              .doc(ticketId)
+                              .update({
+                            'status': 'resolved',
+                            'resolvedAt': FieldValue.serverTimestamp(),
+                          });
+                          setState(() {});
+                        },
+                        child: const Text('Mark Resolved', style: TextStyle(fontSize: 13)),
+                      ),
+                    ],
+                  ),
                 ],
-                const SizedBox(height: 8),
-                TextButton(onPressed: () => FirebaseFirestore.instance.collection('tickets').doc(tickets[index].id).update({'status': 'resolved', 'resolvedAt': FieldValue.serverTimestamp()}), child: const Text('Mark Resolved', style: TextStyle(fontSize: 13))),
-              ]),
+              ),
             );
           },
         );

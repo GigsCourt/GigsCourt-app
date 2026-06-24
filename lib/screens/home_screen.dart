@@ -67,7 +67,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 1. Show last known position immediately
       final lastPosition = await Geolocator.getLastKnownPosition();
       if (lastPosition != null) {
         _userLat = lastPosition.latitude;
@@ -75,13 +74,11 @@ class _HomeScreenState extends State<HomeScreen> {
         await _loadProviders();
       }
 
-      // 2. Get fresh GPS in background
       try {
         final freshPosition = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
         ).timeout(const Duration(seconds: 5));
 
-        // Only reload if position changed significantly
         if (_userLat == null ||
             (freshPosition.latitude - _userLat!).abs() > 0.001 ||
             (freshPosition.longitude - _userLng!).abs() > 0.001) {
@@ -90,14 +87,12 @@ class _HomeScreenState extends State<HomeScreen> {
           await _loadProviders();
         }
       } catch (_) {
-        // Fresh GPS failed, but we already loaded with last known position
         if (_userLat == null) {
           setState(() => _isLoading = false);
           return;
         }
       }
 
-      // 3. Listen for significant movement
       _locationSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -254,8 +249,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${diff.inDays ~/ 7}w ago';
   }
 
+  // ========== HANDLE PROVIDER TAP (WITH OWN PROFILE CHECK) ==========
+
   void _handleProviderTap(Map<String, dynamic> provider) {
-    if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
+    // ✅ FIX: Allow the provider to view their own profile
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final isOwnProfile = currentUser?.uid == provider['userId'];
+
+    if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked' && !isOwnProfile) {
       _sendBlockedNotification(provider['userId']);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -293,6 +294,38 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadProviders();
   }
 
+  // ========== RESPONSIVE HELPERS ==========
+
+  int _getCrossAxisCount(double screenWidth) {
+    if (screenWidth < 600) {
+      return 2;
+    } else if (screenWidth < 900) {
+      return 3;
+    } else {
+      return 4;
+    }
+  }
+
+  double _getAspectRatio(double screenWidth) {
+    if (screenWidth < 600) {
+      return 0.72;
+    } else if (screenWidth < 900) {
+      return 0.70;
+    } else {
+      return 0.68;
+    }
+  }
+
+  double _getCardSpacing(double screenWidth) {
+    if (screenWidth < 600) {
+      return 12.0;
+    } else {
+      return 16.0;
+    }
+  }
+
+  // ========== BUILD ==========
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -302,14 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'GigsCourt',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontWeight: FontWeight.w700,
-                fontSize: 20,
-              ),
-            ),
+            const Text('GigsCourt',
+                style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 20)),
             if (_isEarlyAccess) ...[
               const SizedBox(width: 8),
               Container(
@@ -318,14 +345,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.white.withAlpha(40),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
-                  'Early Access',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 10,
-                    color: Colors.white,
-                  ),
-                ),
+                child: const Text('Early Access',
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.white)),
               ),
             ],
           ],
@@ -347,25 +368,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   if (count > 0)
                     Positioned(
-                      right: 8,
-                      top: 8,
+                      right: 8, top: 8,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: AppColors.error,
-                          shape: BoxShape.circle,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 16,
-                          minHeight: 16,
-                        ),
+                        decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                         child: Text(
                           count > 99 ? '99+' : '$count',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -389,14 +399,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         controller: _scrollController,
                         padding: const EdgeInsets.all(16),
                         children: [
-                          // Featured Section
                           if (!_isEarlyAccess && _featuredProviders.isNotEmpty) ...[
                             _buildSectionHeader('Featured'),
                             const SizedBox(height: 12),
                             _buildFeaturedSection(context),
                             const SizedBox(height: 24),
                           ],
-                          // All Providers Section
                           _buildSectionHeader('All Providers'),
                           const SizedBox(height: 12),
                           if (_allProviders.isEmpty)
@@ -420,57 +428,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
           if (_showScrollToTop)
             Positioned(
-              bottom: 20,
-              right: 20,
+              bottom: 20, right: 20,
               child: FloatingActionButton.small(
-                onPressed: () => _scrollController.animateTo(
-                  0,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                ),
+                onPressed: () => _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut),
                 backgroundColor: AppColors.primary,
-                child: const Icon(
-                  Icons.keyboard_arrow_up,
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.keyboard_arrow_up, color: Colors.white),
               ),
             ),
         ],
       ),
     );
   }
-
-  // ========== RESPONSIVE GRID ==========
-
-  int _getCrossAxisCount(double screenWidth) {
-    if (screenWidth < 600) {
-      return 2; // Phones
-    } else if (screenWidth < 900) {
-      return 3; // Small tablets
-    } else {
-      return 4; // Large tablets
-    }
-  }
-
-  double _getAspectRatio(double screenWidth) {
-    if (screenWidth < 600) {
-      return 0.72; // Phones (same as before)
-    } else if (screenWidth < 900) {
-      return 0.70; // Small tablets
-    } else {
-      return 0.68; // Large tablets (wider cards)
-    }
-  }
-
-  double _getCardSpacing(double screenWidth) {
-    if (screenWidth < 600) {
-      return 12.0; // Phones
-    } else {
-      return 16.0; // Tablets (more spacing)
-    }
-  }
-
-  // ========== BUILDER WIDGETS ==========
 
   Widget _buildFeaturedSection(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -551,7 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: 3,
-            itemBuilder: (_, _) => const ProviderCardSkeleton(isHorizontal: true),
+            itemBuilder: (context, index) => const ProviderCardSkeleton(isHorizontal: true),
           ),
         ),
         const SizedBox(height: 24),
@@ -567,7 +535,7 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSpacing: spacing,
           ),
           itemCount: 6,
-          itemBuilder: (_, _) => const ProviderCardSkeleton(),
+          itemBuilder: (context, index) => const ProviderCardSkeleton(),
         ),
       ],
     );

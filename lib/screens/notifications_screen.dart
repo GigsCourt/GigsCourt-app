@@ -17,8 +17,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (_currentUser == null) return;
     final batch = FirebaseFirestore.instance.batch();
     final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_currentUser.uid)
         .collection('notifications')
-        .where('userId', isEqualTo: _currentUser.uid)
         .where('isRead', isEqualTo: false)
         .get();
 
@@ -30,6 +31,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _markAsRead(String docId) async {
     await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_currentUser!.uid)
         .collection('notifications')
         .doc(docId)
         .update({'isRead': true});
@@ -98,8 +101,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(_currentUser.uid)
             .collection('notifications')
-            .where('userId', isEqualTo: _currentUser.uid)
             .orderBy('createdAt', descending: true)
             .limit(20)
             .snapshots(),

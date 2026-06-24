@@ -29,6 +29,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isEarlyAccess = false;
   bool _isUploading = false;
   StreamSubscription? _userStream;
+  
+  // Follower/Following counts from sub-collections
+  int _followerCount = 0;
+  int _followingCount = 0;
 
   @override
   void initState() {
@@ -74,8 +78,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
           });
         }
       });
+
+      // Load follower and following counts from sub-collections
+      _loadFollowerAndFollowingCounts(user.uid);
+
     } catch (e) {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadFollowerAndFollowingCounts(String userId) async {
+    try {
+      // Listen to followers count
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('followers')
+          .snapshots()
+          .listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            _followerCount = snapshot.docs.length;
+          });
+        }
+      });
+
+      // Listen to following count
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('following')
+          .snapshots()
+          .listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            _followingCount = snapshot.docs.length;
+          });
+        }
+      });
+    } catch (e) {
+      // Handle error
     }
   }
 
@@ -176,12 +218,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) {
+      return baseSize * 0.9;
+    } else if (screenWidth > 600) {
+      return baseSize * 1.1;
+    }
+    return baseSize;
+  }
+
+  int _getPhotoGridColumns() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return 3;
+    if (screenWidth < 600) return 3;
+    if (screenWidth < 900) return 4;
+    return 5;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(16.0);
+    final photoColumns = _getPhotoGridColumns();
+
     if (_isLoading && _userData == null) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(backgroundColor: AppColors.primary, title: const Text('Profile', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600))),
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          title: const Text(
+            'Profile',
+            style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
+          ),
+        ),
         body: _buildSkeleton(),
       );
     }
@@ -191,8 +262,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isVerified = _userData?['subscriptionStatus'] == 'premium';
     final rating = (_userData?['averageRating'] ?? 0.0).toDouble();
     final reviewCount = _userData?['reviewCount'] ?? 0;
-    final followerCount = _userData?['followerCount'] ?? 0;
-    final followingCount = _userData?['followingCount'] ?? 0;
     final subscriptionStatus = _userData?['subscriptionStatus'] ?? 'free';
     final leadCount = _userData?['leadCount'] ?? 0;
     final maxLeads = 10;
@@ -202,77 +271,202 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        title: const Text('Profile', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+        title: const Text(
+          'Profile',
+          style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.menu), onPressed: () => Navigator.of(context).pushNamed('/settings')),
+          IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Navigator.of(context).pushNamed('/settings'),
+          ),
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Profile Photo
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(80),
                 child: SizedBox(
-                  width: 140, height: 140,
+                  width: 140,
+                  height: 140,
                   child: photoUrl != null
-                      ? Image.network(ImageOptimizer.medium(photoUrl, width: 280, height: 280), fit: BoxFit.cover)
-                      : Container(color: AppColors.primary.withAlpha(26), child: Icon(Icons.person, size: 60, color: AppColors.primary)),
+                      ? Image.network(
+                          ImageOptimizer.medium(photoUrl, width: 280, height: 280),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: AppColors.primary.withAlpha(26),
+                              child: Icon(Icons.person, size: 60, color: AppColors.primary),
+                            );
+                          },
+                        )
+                      : Container(
+                          color: AppColors.primary.withAlpha(26),
+                          child: Icon(Icons.person, size: 60, color: AppColors.primary),
+                        ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
+
+            // Name + Verified Badge
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 22, color: AppColors.textPrimary))),
+                Flexible(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w700,
+                      fontSize: fontSize + 6,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
                 if (isVerified) ...[
                   const SizedBox(width: 6),
-                  SvgPicture.asset('assets/icons/verified.svg', width: 20, height: 20, colorFilter: const ColorFilter.mode(AppColors.accent, BlendMode.srcIn)),
+                  SvgPicture.asset(
+                    'assets/icons/verified.svg',
+                    width: 20,
+                    height: 20,
+                    colorFilter: const ColorFilter.mode(AppColors.accent, BlendMode.srcIn),
+                  ),
                 ],
               ],
             ),
             const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              GestureDetector(onTap: () => Navigator.of(context).pushNamed('/provider-profile', arguments: FirebaseAuth.instance.currentUser?.uid), child: _buildStat('$rating', 'Reviews')),
-              _buildDivider(),
-              _buildStat('$followerCount', 'Followers'),
-              _buildDivider(),
-              GestureDetector(onTap: () => Navigator.of(context).pushNamed('/following'), child: _buildStat('$followingCount', 'Following')),
-            ]),
+
+            // Stats (Reviews, Followers, Following)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pushNamed(
+                    '/provider-profile',
+                    arguments: FirebaseAuth.instance.currentUser?.uid,
+                  ),
+                  child: _buildStat(rating.toStringAsFixed(1), 'Reviews'),
+                ),
+                _buildDivider(),
+                _buildStat('$_followerCount', 'Followers'),
+                _buildDivider(),
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pushNamed('/following'),
+                  child: _buildStat('$_followingCount', 'Following'),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
 
             // Threshold progress (only post-EA, only for free users)
             if (!_isEarlyAccess && subscriptionStatus == 'free') ...[
               Container(
-                width: double.infinity, padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Your Progress', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('$leadCount / $maxLeads leads', style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
-                      const SizedBox(height: 4),
-                      ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: leadCount / maxLeads, backgroundColor: AppColors.primary.withAlpha(26), color: AppColors.primary, minHeight: 6)),
-                    ])),
-                    const SizedBox(width: 16),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('$reviewCount / $maxReviews reviews', style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
-                      const SizedBox(height: 4),
-                      ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: reviewCount / maxReviews, backgroundColor: AppColors.accent.withAlpha(26), color: AppColors.accent, minHeight: 6)),
-                    ])),
-                  ]),
-                  if (leadCount >= maxLeads || reviewCount >= maxReviews) ...[
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withAlpha(26)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Your Progress',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                     const SizedBox(height: 12),
-                    SizedBox(width: double.infinity, child: ElevatedButton(
-                      onPressed: () => Navigator.of(context).pushNamed('/subscription'),
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                      child: const Text('Subscribe Now', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
-                    )),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$leadCount / $maxLeads leads',
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: leadCount / maxLeads,
+                                  backgroundColor: AppColors.primary.withAlpha(26),
+                                  color: AppColors.primary,
+                                  minHeight: 6,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$reviewCount / $maxReviews reviews',
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: reviewCount / maxReviews,
+                                  backgroundColor: AppColors.accent.withAlpha(26),
+                                  color: AppColors.accent,
+                                  minHeight: 6,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (leadCount >= maxLeads || reviewCount >= maxReviews) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.of(context).pushNamed('/subscription'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            'Subscribe Now',
+                            style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ]),
+                ),
               ),
               const SizedBox(height: 16),
             ],
@@ -281,48 +475,146 @@ class _ProfileScreenState extends State<ProfileScreen> {
             GestureDetector(
               onTap: () => Navigator.of(context).pushNamed('/subscription'),
               child: Container(
-                width: double.infinity, padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
-                child: Row(children: [
-                  Icon(subscriptionStatus == 'premium' ? Icons.verified : Icons.workspace_premium_outlined, color: AppColors.accent),
-                  const SizedBox(width: 8),
-                  Text(subscriptionStatus == 'premium' ? 'Premium' : 'Free', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary)),
-                  const Spacer(),
-                  const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-                ]),
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withAlpha(26)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      subscriptionStatus == 'premium'
+                          ? Icons.verified
+                          : Icons.workspace_premium_outlined,
+                      color: AppColors.accent,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      subscriptionStatus == 'premium' ? 'Premium' : 'Free',
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
 
+            // ========== SERVICES ==========
             if (_services.isNotEmpty) ...[
-              _buildSectionTile('My Services', '${_services.length} services', () => Navigator.of(context).pushNamed('/edit-profile')),
+              const Text(
+                'My Services',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _services.map((service) {
+                  return Chip(
+                    label: Text(
+                      service['name'],
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                      ),
+                    ),
+                    backgroundColor: AppColors.primary.withAlpha(20),
+                    side: BorderSide.none,
+                  );
+                }).toList(),
+              ),
               const SizedBox(height: 16),
             ],
 
-            Align(alignment: Alignment.centerLeft, child: Text('Work Photos', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary))),
+            // Work Photos
+            const Text(
+              'Work Photos',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
+
             if (_workPhotos.length < 15)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
-                  onPressed: _isUploading ? null : _addWorkPhoto,
-                  icon: _isUploading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                  label: Text(_isUploading ? 'Uploading...' : 'Add Photo', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w500)),
-                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.primary, side: BorderSide(color: AppColors.primary.withAlpha(51)), shape: const StadiumBorder(), padding: const EdgeInsets.symmetric(vertical: 12)),
-                )),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isUploading ? null : _addWorkPhoto,
+                    icon: _isUploading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                    label: Text(
+                      _isUploading ? 'Uploading...' : 'Add Photo',
+                      style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w500),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: BorderSide(color: AppColors.primary.withAlpha(51)),
+                      shape: const StadiumBorder(),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
               )
             else
-              const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('15/15 — Max reached', style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary))),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '15/15 — Max reached',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ),
+
             if (_workPhotos.isNotEmpty)
               GridView.builder(
-                shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: photoColumns,
+                  crossAxisSpacing: 4,
+                  mainAxisSpacing: 4,
+                ),
                 itemCount: _workPhotos.length,
                 itemBuilder: (context, index) {
                   return GestureDetector(
                     onTap: () => _viewPhoto(index),
                     onLongPress: () => _showPhotoOptions(index),
-                    child: ClipRRect(borderRadius: _getPhotoBorderRadius(index, _workPhotos.length), child: Image.network(ImageOptimizer.thumbnail(_workPhotos[index]), fit: BoxFit.cover)),
+                    child: ClipRRect(
+                      borderRadius: _getPhotoBorderRadius(index, _workPhotos.length),
+                      child: Image.network(
+                        ImageOptimizer.thumbnail(_workPhotos[index]),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: AppColors.primary.withAlpha(26),
+                            child: const Icon(Icons.broken_image, color: AppColors.textSecondary),
+                          );
+                        },
+                      ),
+                    ),
                   );
                 },
               ),
@@ -335,50 +627,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildSkeleton() {
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Column(children: [
-        const Center(child: SkeletonLoader(width: 140, height: 140, borderRadius: 70)),
-        const SizedBox(height: 16),
-        const Center(child: SkeletonLoader(width: 150, height: 22)),
-        const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const SkeletonLoader(width: 50, height: 30), const SizedBox(width: 20),
-          const SkeletonLoader(width: 50, height: 30), const SizedBox(width: 20),
-          const SkeletonLoader(width: 50, height: 30),
-        ]),
-        const SizedBox(height: 24),
-        const SkeletonLoader(height: 60), const SizedBox(height: 16),
-        const SkeletonLoader(height: 60), const SizedBox(height: 8),
-        const SkeletonLoader(height: 60),
-      ]),
+      child: Column(
+        children: [
+          const Center(child: SkeletonLoader(width: 140, height: 140, borderRadius: 70)),
+          const SizedBox(height: 16),
+          const Center(child: SkeletonLoader(width: 150, height: 22)),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SkeletonLoader(width: 50, height: 30),
+              const SizedBox(width: 20),
+              const SkeletonLoader(width: 50, height: 30),
+              const SizedBox(width: 20),
+              const SkeletonLoader(width: 50, height: 30),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const SkeletonLoader(height: 60),
+          const SizedBox(height: 16),
+          const SkeletonLoader(height: 60),
+          const SizedBox(height: 8),
+          const SkeletonLoader(height: 60),
+        ],
+      ),
     );
   }
 
   Widget _buildStat(String value, String label) {
-    return Column(children: [
-      Text(value, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.textPrimary)),
-      Text(label, style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textSecondary)),
-    ]);
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 12,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildDivider() {
-    return Container(height: 24, width: 1, color: AppColors.primary.withAlpha(26), margin: const EdgeInsets.symmetric(horizontal: 16));
-  }
-
-  Widget _buildSectionTile(String title, String subtitle, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity, padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withAlpha(26))),
-        child: Row(children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            Text(subtitle, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: AppColors.textSecondary)),
-          ]),
-          const Spacer(),
-          const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-        ]),
-      ),
+    return Container(
+      height: 24,
+      width: 1,
+      color: AppColors.primary.withAlpha(26),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
     );
   }
 
@@ -403,7 +708,11 @@ class _PhotoViewer extends StatefulWidget {
   final int initialIndex;
   final Function(int) onDelete;
 
-  const _PhotoViewer({required this.photos, required this.initialIndex, required this.onDelete});
+  const _PhotoViewer({
+    required this.photos,
+    required this.initialIndex,
+    required this.onDelete,
+  });
 
   @override
   State<_PhotoViewer> createState() => _PhotoViewerState();
@@ -432,13 +741,26 @@ class _PhotoViewerState extends State<_PhotoViewer> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text('${_currentIndex + 1} of ${widget.photos.length}', style: const TextStyle(fontFamily: 'Inter', fontSize: 14)),
+        title: Text(
+          '${_currentIndex + 1} of ${widget.photos.length}',
+          style: const TextStyle(fontFamily: 'Inter', fontSize: 14),
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.delete_outline), onPressed: () {
-            widget.onDelete(_currentIndex);
-            if (widget.photos.length <= 1) { Navigator.of(context).pop(); } else { setState(() {}); }
-          }),
-          IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () {
+              widget.onDelete(_currentIndex);
+              if (widget.photos.length <= 1) {
+                Navigator.of(context).pop();
+              } else {
+                setState(() {});
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
         ],
       ),
       body: PageView.builder(
@@ -447,7 +769,19 @@ class _PhotoViewerState extends State<_PhotoViewer> {
         onPageChanged: (index) => setState(() => _currentIndex = index),
         itemBuilder: (context, index) {
           return InteractiveViewer(
-            child: Center(child: Image.network(ImageOptimizer.original(widget.photos[index]), fit: BoxFit.contain)),
+            child: Center(
+              child: Image.network(
+                ImageOptimizer.original(widget.photos[index]),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Icon(
+                    Icons.broken_image,
+                    color: Colors.white54,
+                    size: 48,
+                  );
+                },
+              ),
+            ),
           );
         },
       ),

@@ -15,9 +15,10 @@ class ImageOptimizer {
 
   static String _transform(String url, int width, int height) {
     if (!url.contains(_baseUrl)) return url;
+    // Use fo-auto to show full image instead of cropping to faces
     return url.replaceAll(
       _baseUrl,
-      '$_baseUrl/tr:w-$width,h-$height,fo-face',
+      '$_baseUrl/tr:w-$width,h-$height,fo-auto',
     );
   }
 }

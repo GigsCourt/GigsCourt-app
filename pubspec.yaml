@@ -30,6 +30,8 @@ dependencies:
   record: ^7.1.0
   audioplayers: ^6.7.1
   supercluster: ^3.2.0
+  flutter_advanced_chat_ui: ^1.0.0
+  keyboard_dismisser: ^3.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

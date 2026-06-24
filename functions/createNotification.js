@@ -28,8 +28,17 @@ exports.createNotification = functions.https.onRequest(async (req, res) => {
       return;
     }
 
+    // Validate allowed types
+    const allowedTypes = ['chat', 'subscription', 'review', 'locked', 'admin_service', 'admin_report', 'admin_ticket'];
+    if (type && !allowedTypes.includes(type)) {
+      res.status(400).json({ error: 'Invalid notification type' });
+      return;
+    }
+
     const db = admin.firestore();
-    await db.collection('notifications').add({
+
+    // ✅ WRITE TO SUB-COLLECTION
+    await db.collection('users').doc(userId).collection('notifications').add({
       userId,
       title,
       body,
@@ -59,11 +68,12 @@ exports.createNotification = functions.https.onRequest(async (req, res) => {
         });
       }
     } catch (pushError) {
-      console.log('Push notification failed:', pushError);
+      console.error('Push notification failed:', pushError);
     }
 
     res.json({ success: true });
   } catch (e) {
+    console.error('Notification creation failed:', e);
     res.status(401).json({ error: 'Invalid token' });
   }
 });

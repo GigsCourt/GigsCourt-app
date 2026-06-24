@@ -13,5 +13,6 @@ exports.createNotification = createNotification.createNotification;
 exports.initializePayment = initializePayment.initializePayment;
 exports.verifyPayment = verifyPayment.verifyPayment;
 exports.trackEngagement = trackEngagement.trackEngagement;
-exports.updateStats = updateStats.updateStats;
+exports.updateStats = updateStats.incrementUserCounter;
+exports.updateStatsSubscribers = updateStats.trackSubscription;
 exports.checkSubscriptionExpiry = checkSubscriptionExpiry.checkSubscriptionExpiry;

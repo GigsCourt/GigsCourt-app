@@ -14,6 +14,7 @@ class ProviderCard extends StatelessWidget {
   final double distanceKm;
   final bool isHorizontal;
   final VoidCallback onTap;
+  final bool isLocked; // ← NEW: Lock state indicator
 
   const ProviderCard({
     super.key,
@@ -28,6 +29,7 @@ class ProviderCard extends StatelessWidget {
     required this.distanceKm,
     this.isHorizontal = false,
     required this.onTap,
+    this.isLocked = false, // ← NEW
   });
 
   @override
@@ -59,18 +61,37 @@ class ProviderCard extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: 64,
-              height: 64,
-              child: photoUrl != null
-                  ? Image.network(photoUrl!, fit: BoxFit.cover)
-                  : Container(
-                      color: AppColors.primary.withAlpha(26),
-                      child: Icon(Icons.person, color: AppColors.primary),
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: photoUrl != null
+                      ? Image.network(photoUrl!, fit: BoxFit.cover)
+                      : Container(
+                          color: AppColors.primary.withAlpha(26),
+                          child: Icon(Icons.person, color: AppColors.primary),
+                        ),
+                ),
+              ),
+              // ========== LOCK OVERLAY ==========
+              if (isLocked)
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(120),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-            ),
+                    child: const Icon(
+                      Icons.lock_outline,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -104,6 +125,25 @@ class ProviderCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                  // ========== PREMIUM BADGE ==========
+                  if (isVerified)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      margin: const EdgeInsets.only(left: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withAlpha(30),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Premium',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.accent,
+                        ),
+                      ),
+                    ),
                 ]),
                 const SizedBox(height: 2),
                 _buildStatusRow(),
@@ -193,38 +233,106 @@ class ProviderCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         // Image - fixed height 120px
-        ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-          ),
-          child: SizedBox(
-            height: 120,
-            width: double.infinity,
-            child: photoUrl != null
-                ? Image.network(
-                    photoUrl!,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
+        Stack(
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+              child: SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: photoUrl != null
+                    ? Image.network(
+                        photoUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: AppColors.primary.withAlpha(26),
+                            child: Icon(
+                              Icons.person,
+                              color: AppColors.primary,
+                              size: 36,
+                            ),
+                          );
+                        },
+                      )
+                    : Container(
                         color: AppColors.primary.withAlpha(26),
                         child: Icon(
                           Icons.person,
                           color: AppColors.primary,
                           size: 36,
                         ),
-                      );
-                    },
-                  )
-                : Container(
-                    color: AppColors.primary.withAlpha(26),
+                      ),
+              ),
+            ),
+            // ========== LOCK OVERLAY ==========
+            if (isLocked)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(120),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: const Center(
                     child: Icon(
-                      Icons.person,
-                      color: AppColors.primary,
+                      Icons.lock_outline,
+                      color: Colors.white,
                       size: 36,
                     ),
                   ),
-          ),
+                ),
+              ),
+            // ========== PREMIUM BADGE ==========
+            if (isVerified)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(26),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SvgPicture.asset(
+                        'assets/icons/verified.svg',
+                        width: 12,
+                        height: 12,
+                        colorFilter: const ColorFilter.mode(
+                          Colors.white,
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Premium',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
         // Content area
         Padding(
@@ -360,12 +468,12 @@ class ProviderCard extends StatelessWidget {
                       minimumSize: const Size(0, 0),
                     ),
                     child: Text(
-                      'View Profile',
+                      isLocked ? 'Locked' : 'View Profile',
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: buttonSize,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.accent,
+                        color: isLocked ? Colors.grey : AppColors.accent,
                       ),
                     ),
                   ),

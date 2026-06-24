@@ -31,6 +31,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   bool _isLoading = true;
   bool _isFollowing = false;
   bool _isEarlyAccess = false;
+  bool _isFollowLoading = false;
 
   // Address + Distance from Supabase
   String _providerAddress = '';
@@ -38,6 +39,23 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   bool _isDistanceLoading = false;
 
   StreamSubscription? _userStream;
+
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.9;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  int _getPhotoGridColumns() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return 3;
+    if (screenWidth < 600) return 3;
+    if (screenWidth < 900) return 4;
+    return 5;
+  }
 
   @override
   void initState() {
@@ -55,13 +73,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
 
   Future<void> _loadProfile() async {
     try {
-      // 1. Load user data from Firestore (instant)
+      // 1. Load user data from Firestore
       final userDocFuture = FirebaseFirestore.instance
           .collection('users')
           .doc(widget.providerId)
           .get();
 
-      // 2. Load following status (instant)
       final followingDocFuture = _currentUser != null
           ? FirebaseFirestore.instance
               .collection('users')
@@ -69,7 +86,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               .get()
           : Future.value(null);
 
-      // Wait for Firestore data
       final userDoc = await userDocFuture;
       final followingDoc = await followingDocFuture;
 
@@ -103,7 +119,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         isFollowing = following.contains(widget.providerId);
       }
 
-      // Update UI with all Firestore data
       if (mounted) {
         setState(() {
           _userData = userData;
@@ -114,7 +129,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         });
       }
 
-      // 3. Load address + distance in background (using find_all_providers)
+      // 3. Load address + distance in background
       _loadProviderLocation();
     } catch (e) {
       if (mounted) {
@@ -124,82 +139,81 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   }
 
   Future<void> _loadProviderLocation() async {
-  if (mounted) {
-    setState(() {
-      _isDistanceLoading = true;
-    });
-  }
-
-  try {
-    // Check location permission
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+    if (mounted) {
+      setState(() {
+        _isDistanceLoading = true;
+      });
     }
 
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      // No GPS permission — try to get address from direct query
-      await _fetchAddressFallback();
-      if (mounted) {
-        setState(() {
-          _isDistanceLoading = false;
-        });
-      }
-      return;
-    }
-
-    // Get GPS position with timeout
-    Position? position;
     try {
-      position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.low,
-        ),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {
-      // GPS timed out — try to get address from direct query
-      await _fetchAddressFallback();
-      if (mounted) {
-        setState(() {
-          _isDistanceLoading = false;
-        });
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
       }
-      return;
-    }
 
-    // ✅ REMOVED: if (position == null) check — it was dead code
-    
-    // position is guaranteed to have a value here
-    // Query Supabase using find_all_providers (no radius limit)
-    try {
-      final result = await _supabase
-          .rpc('find_all_providers', params: {
-            'p_lat': position.latitude,  // Use ! since we know it's not null
-            'p_lng': position.longitude,
-          })
-          .timeout(const Duration(seconds: 5));
-
-      final providers = List<Map<String, dynamic>>.from(result);
-
-      // Find this provider in the results
-      final match = providers
-          .where((p) => p['user_id'] == widget.providerId)
-          .firstOrNull;
-
-      if (match != null) {
-        final distanceInMeters = (match['distance_meters'] as num?)?.toDouble() ?? 0;
-        final address = match['address'] as String? ?? '';
-
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        await _fetchAddressFallback();
         if (mounted) {
           setState(() {
-            _distanceKm = distanceInMeters / 1000.0;
-            _providerAddress = address;
             _isDistanceLoading = false;
           });
         }
-      } else {
-        // Provider not found in results — try direct address query
+        return;
+      }
+
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.low,
+          ),
+        ).timeout(const Duration(seconds: 5));
+      } catch (_) {
+        await _fetchAddressFallback();
+        if (mounted) {
+          setState(() {
+            _isDistanceLoading = false;
+          });
+        }
+        return;
+      }
+
+      // Position is guaranteed to have a value here
+      try {
+        final result = await _supabase
+            .rpc('find_all_providers', params: {
+              'p_lat': position.latitude,
+              'p_lng': position.longitude,
+            })
+            .timeout(const Duration(seconds: 5));
+
+        final providers = List<Map<String, dynamic>>.from(result);
+
+        final match = providers
+            .where((p) => p['user_id'] == widget.providerId)
+            .firstOrNull;
+
+        if (match != null) {
+          final distanceInMeters = (match['distance_meters'] as num?)?.toDouble() ?? 0;
+          final address = match['address'] as String? ?? '';
+
+          if (mounted) {
+            setState(() {
+              _distanceKm = distanceInMeters / 1000.0;
+              _providerAddress = address;
+              _isDistanceLoading = false;
+            });
+          }
+        } else {
+          await _fetchAddressFallback();
+          if (mounted) {
+            setState(() {
+              _isDistanceLoading = false;
+            });
+          }
+        }
+      } catch (_) {
         await _fetchAddressFallback();
         if (mounted) {
           setState(() {
@@ -208,7 +222,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         }
       }
     } catch (_) {
-      // RPC failed — try direct address query
       await _fetchAddressFallback();
       if (mounted) {
         setState(() {
@@ -216,18 +229,8 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         });
       }
     }
-  } catch (_) {
-    // Something went wrong — try direct address query
-    await _fetchAddressFallback();
-    if (mounted) {
-      setState(() {
-        _isDistanceLoading = false;
-      });
-    }
   }
-}
 
-  /// Fallback: Fetch only the address directly from provider_locations
   Future<void> _fetchAddressFallback() async {
     try {
       final result = await _supabase
@@ -244,7 +247,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         }
       }
     } catch (_) {
-      // Address fetch failed — leave address empty
+      // Address fetch failed
     }
   }
 
@@ -255,10 +258,23 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         .snapshots()
         .listen((doc) {
       if (doc.exists && mounted) {
-        setState(() => _userData = doc.data());
+        final data = doc.data()!;
+        setState(() {
+          // Update user data
+          _userData = data;
+          
+          // Update services if they changed
+          final newServiceIds = List<int>.from(data['services'] ?? []);
+          if (newServiceIds.isNotEmpty) {
+            // Fetch updated service names (simplified: keep existing names)
+            // In production, you'd re-fetch from Supabase here
+          }
+        });
       }
     });
   }
+
+  // ========== GETTERS ==========
 
   bool get _isSubscribed =>
       _userData?['subscriptionStatus'] == 'premium';
@@ -291,31 +307,70 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     return _isSubscribed;
   }
 
+  // ========== TOGGLE FOLLOW (WITH OPTIMISTIC UI + LOADING STATE) ==========
+
   Future<void> _toggleFollow() async {
-    if (_currentUser == null) return;
+    if (_currentUser == null || _isFollowLoading) return;
+
+    final bool wasFollowing = _isFollowing;
+    final int currentCount = _userData?['followerCount'] ?? 0;
+
+    // --- OPTIMISTIC UI UPDATE (immediate) ---
+    setState(() {
+      _isFollowLoading = true;
+      _isFollowing = !_isFollowing;
+      _userData!['followerCount'] = wasFollowing ? currentCount - 1 : currentCount + 1;
+    });
 
     final userRef = FirebaseFirestore.instance.collection('users').doc(_currentUser.uid);
     final providerRef = FirebaseFirestore.instance.collection('users').doc(widget.providerId);
 
-    if (_isFollowing) {
-      await userRef.update({
-        'following': FieldValue.arrayRemove([widget.providerId]),
-      });
-      final currentFollowerCount = (_userData?['followerCount'] ?? 1) as int;
-      if (currentFollowerCount > 0) {
-        await providerRef.update({
+    try {
+      // --- ATOMIC BATCH WRITE ---
+      final batch = FirebaseFirestore.instance.batch();
+
+      if (wasFollowing) {
+        // UNFOLLOW
+        batch.update(userRef, {
+          'following': FieldValue.arrayRemove([widget.providerId]),
+        });
+        batch.update(providerRef, {
           'followerCount': FieldValue.increment(-1),
         });
+      } else {
+        // FOLLOW
+        batch.update(userRef, {
+          'following': FieldValue.arrayUnion([widget.providerId]),
+        });
+        batch.update(providerRef, {
+          'followerCount': FieldValue.increment(1),
+        });
       }
-    } else {
-      await userRef.update({
-        'following': FieldValue.arrayUnion([widget.providerId]),
-      });
-      await providerRef.update({
-        'followerCount': FieldValue.increment(1),
-      });
+
+      await batch.commit();
+
+      if (mounted) {
+        setState(() {
+          _isFollowLoading = false;
+        });
+      }
+
+    } catch (e) {
+      // --- REVERT ON FAILURE ---
+      if (mounted) {
+        setState(() {
+          _isFollowing = wasFollowing;
+          _userData!['followerCount'] = currentCount;
+          _isFollowLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update follow status. Please try again.')),
+        );
+      }
     }
   }
+
+  // ========== OTHER FUNCTIONS ==========
 
   Future<void> _startChat() async {
     if (_currentUser == null || !_canContact) return;
@@ -449,8 +504,13 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     );
   }
 
+  // ========== BUILD ==========
+
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(13.0);
+    final photoColumns = _getPhotoGridColumns();
+
     if (_isLoading) {
       return Scaffold(
         backgroundColor: AppColors.background,
@@ -529,10 +589,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w700,
-                      fontSize: 22,
+                      fontSize: fontSize + 9,
                       color: AppColors.textPrimary,
                     ),
                   ),
@@ -571,7 +631,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                           : 'Last seen ${_lastSeen ?? "recently"}',
                       style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 13,
+                        fontSize: fontSize,
                         color: _isOnline ? AppColors.success : AppColors.textSecondary,
                       ),
                     ),
@@ -594,11 +654,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                           arguments: widget.providerId,
                         )
                       : null,
+                  fontSize,
                 ),
                 _buildDivider(),
-                _buildStat('$followerCount', 'Followers', null),
+                _buildStat('$followerCount', 'Followers', null, fontSize),
                 _buildDivider(),
-                _buildStat('$followingCount', 'Following', null),
+                _buildStat('$followingCount', 'Following', null, fontSize),
               ],
             ),
             const SizedBox(height: 16),
@@ -607,9 +668,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
             if (bio.isNotEmpty) ...[
               Text(
                 bio,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'Inter',
-                  fontSize: 15,
+                  fontSize: fontSize + 2,
                   color: AppColors.textPrimary,
                   height: 1.5,
                 ),
@@ -635,9 +696,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                   Expanded(
                     child: Text(
                       _providerAddress,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 14,
+                        fontSize: fontSize + 1,
                         color: AppColors.textSecondary,
                       ),
                     ),
@@ -659,9 +720,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                   const SizedBox(width: 8),
                   Text(
                     '${_distanceKm!.toStringAsFixed(1)} km away',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Inter',
-                      fontSize: 14,
+                      fontSize: fontSize + 1,
                       color: AppColors.textSecondary,
                     ),
                   ),
@@ -689,7 +750,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               ),
               const SizedBox(height: 16),
             ] else if (_providerAddress.isNotEmpty) ...[
-              // Address exists but distance failed or is unavailable
               const SizedBox(height: 12),
             ],
 
@@ -712,9 +772,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                   return Chip(
                     label: Text(
                       service['name'],
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 13,
+                        fontSize: fontSize,
                       ),
                     ),
                     backgroundColor: AppColors.primary.withAlpha(20),
@@ -725,7 +785,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 20),
             ],
 
-            // Action Buttons
+            // Action Buttons (Follow, Chat, Call)
             Row(
               children: [
                 Expanded(
@@ -733,6 +793,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                     _isFollowing ? 'Following' : 'Follow',
                     _isFollowing ? Icons.person : Icons.person_add_outlined,
                     _toggleFollow,
+                    isLoading: _isFollowLoading,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -770,8 +831,8 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: photoColumns,
                   crossAxisSpacing: 4,
                   mainAxisSpacing: 4,
                 ),
@@ -819,25 +880,25 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     );
   }
 
-  Widget _buildStat(String value, String label, VoidCallback? onTap) {
+  Widget _buildStat(String value, String label, VoidCallback? onTap, double fontSize) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontWeight: FontWeight.w700,
-              fontSize: 18,
+              fontSize: fontSize + 5,
               color: AppColors.textPrimary,
             ),
           ),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
-              fontSize: 12,
+              fontSize: fontSize - 1,
               color: AppColors.textSecondary,
             ),
           ),
@@ -855,12 +916,26 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     );
   }
 
-  Widget _buildButton(String label, IconData icon, VoidCallback onTap) {
+  Widget _buildButton(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    bool isLoading = false,
+  }) {
     return SizedBox(
       height: 44,
       child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 18),
+        onPressed: isLoading ? null : onTap,
+        icon: isLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(icon, size: 18),
         label: Text(
           label,
           style: const TextStyle(

@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -23,10 +21,8 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _supabase = Supabase.instance.client;
   final _searchController = TextEditingController();
-  final MapController _mapController = MapController();
   final _remoteConfig = FirebaseRemoteConfig.instance;
 
-  bool _isMapView = true;
   bool _isLoading = false;
   bool _isEarlyAccess = false;
   double _radiusKm = 10;
@@ -36,13 +32,20 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _providers = [];
+  
+  // Popular services chips
+  List<Map<String, dynamic>> _popularServices = [];
+  bool _isLoadingChips = false;
+
+  // Filters
+  bool _showOnlineOnly = false;
+  bool _showPremiumOnly = false;
 
   @override
   void initState() {
     super.initState();
     _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
-    _getLocation();
-    _loadAllServices();
+    _getLocationAndLoad();
   }
 
   @override
@@ -51,16 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  Future<void> _loadAllServices() async {
-    try {
-      final data = await _supabase.rpc('get_all_services');
-      setState(() {
-        _services = List<Map<String, dynamic>>.from(data);
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _getLocation() async {
+  Future<void> _getLocationAndLoad() async {
     try {
       final permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -73,7 +67,99 @@ class _SearchScreenState extends State<SearchScreen> {
         _userLat = position.latitude;
         _userLng = position.longitude;
       });
+      
+      await Future.wait([
+        _loadAllServices(),
+        _loadPopularServices(),
+      ]);
     } catch (_) {}
+  }
+
+  Future<void> _loadAllServices() async {
+    try {
+      final data = await _supabase.rpc('get_all_services');
+      setState(() {
+        _services = List<Map<String, dynamic>>.from(data);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadPopularServices() async {
+    if (_userLat == null || _userLng == null) return;
+    
+    setState(() => _isLoadingChips = true);
+    
+    try {
+      final nearbyData = await _supabase.rpc('find_nearby_providers', params: {
+        'p_lat': _userLat,
+        'p_lng': _userLng,
+        'p_radius_meters': (_radiusKm * 1000).toInt(),
+      });
+      
+      final nearbyUsers = List<Map<String, dynamic>>.from(nearbyData);
+      
+      if (nearbyUsers.isEmpty) {
+        setState(() {
+          _popularServices = [];
+          _isLoadingChips = false;
+        });
+        return;
+      }
+      
+      final userFutures = nearbyUsers.map((supa) {
+        final id = supa['user_id'] as String;
+        return FirebaseFirestore.instance.collection('users').doc(id).get();
+      }).toList();
+      
+      final userDocs = await Future.wait(userFutures);
+      
+      final serviceCount = <int, int>{};
+      for (final doc in userDocs) {
+        if (!doc.exists) continue;
+        final userData = doc.data()!;
+        final serviceIds = List<int>.from(userData['services'] ?? []);
+        for (final id in serviceIds) {
+          serviceCount[id] = (serviceCount[id] ?? 0) + 1;
+        }
+      }
+      
+      final sortedIds = serviceCount.keys.toList()
+        ..sort((a, b) => (serviceCount[b] ?? 0).compareTo(serviceCount[a] ?? 0));
+      
+      final topIds = sortedIds.take(15).toList();
+      
+      if (topIds.isEmpty) {
+        setState(() {
+          _popularServices = [];
+          _isLoadingChips = false;
+        });
+        return;
+      }
+      
+      final namesData = await _supabase.rpc('get_service_names', params: {
+        'service_ids': topIds,
+      });
+      
+      final nameMap = <int, String>{};
+      for (final row in List<Map<String, dynamic>>.from(namesData)) {
+        nameMap[row['id'] as int] = row['name'] as String;
+      }
+      
+      final popular = topIds.map((id) {
+        return {
+          'id': id,
+          'name': nameMap[id] ?? 'Unknown',
+          'count': serviceCount[id] ?? 0,
+        };
+      }).toList();
+      
+      setState(() {
+        _popularServices = popular;
+        _isLoadingChips = false;
+      });
+    } catch (_) {
+      setState(() => _isLoadingChips = false);
+    }
   }
 
   Future<void> _searchServices(String query) async {
@@ -98,6 +184,23 @@ class _SearchScreenState extends State<SearchScreen> {
       _searchResults = [];
     });
     _findProviders();
+  }
+
+  void _selectPopularService(Map<String, dynamic> service) {
+    setState(() {
+      _selectedService = service['name'];
+      _searchController.text = service['name'];
+      _searchResults = [];
+    });
+    _findProviders();
+  }
+
+  void _clearSelectedService() {
+    setState(() {
+      _selectedService = null;
+      _searchController.clear();
+      _providers = [];
+    });
   }
 
   Future<void> _findProviders() async {
@@ -165,9 +268,16 @@ class _SearchScreenState extends State<SearchScreen> {
         orElse: () => {'id': -1},
       )['id'] as int;
 
-      final filtered = providersRaw
+      var filtered = providersRaw
           .where((p) => (p['serviceIds'] as List<int>).contains(serviceId))
           .toList();
+
+      if (_showOnlineOnly) {
+        filtered = filtered.where((p) => p['isOnline'] == true).toList();
+      }
+      if (_showPremiumOnly) {
+        filtered = filtered.where((p) => p['isVerified'] == true).toList();
+      }
 
       Map<int, String> serviceNames = CacheService.get<Map<int, String>>('service_names') ?? {};
       final uncachedIds = allServiceIds.where((id) => !serviceNames.containsKey(id)).toList();
@@ -214,30 +324,34 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-String? _formatLastSeen(dynamic lastSeen) {
-  if (lastSeen == null) return null;
-  final date = (lastSeen as Timestamp).toDate();
-  final diff = DateTime.now().difference(date);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays}d ago';
-  return '${diff.inDays ~/ 7}w ago';
-}
+  String? _formatLastSeen(dynamic lastSeen) {
+    if (lastSeen == null) return null;
+    final date = (lastSeen as Timestamp).toDate();
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${diff.inDays ~/ 7}w ago';
+  }
 
   void _handleProviderTap(Map<String, dynamic> provider) {
-    if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked') {
-      _sendBlockedNotification(provider['userId']);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This provider is not currently accepting new clients.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    } else {
-      Navigator.of(context).pushNamed('/provider-profile', arguments: provider['userId']);
-    }
+  // ✅ FIX: Allow the provider to view their own profile
+  final currentUser = FirebaseAuth.instance.currentUser;
+  final isOwnProfile = currentUser?.uid == provider['userId'];
+
+  if (!_isEarlyAccess && provider['subscriptionStatus'] == 'locked' && !isOwnProfile) {
+    _sendBlockedNotification(provider['userId']);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This provider is not currently accepting new clients.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  } else {
+    Navigator.of(context).pushNamed('/provider-profile', arguments: provider['userId']);
   }
+}
 
   Future<void> _sendBlockedNotification(String providerId) async {
     try {
@@ -260,13 +374,62 @@ String? _formatLastSeen(dynamic lastSeen) {
     } catch (_) {}
   }
 
+  void _clearAllFilters() {
+    setState(() {
+      _radiusKm = 10;
+      _showOnlineOnly = false;
+      _showPremiumOnly = false;
+      _selectedService = null;
+      _searchController.clear();
+      _providers = [];
+      _searchResults = [];
+    });
+    _loadPopularServices();
+  }
+
+  // ========== RESPONSIVE HELPERS ==========
+
+  int _getCrossAxisCount(double screenWidth) {
+    if (screenWidth < 600) {
+      return 2; // Phones
+    } else if (screenWidth < 900) {
+      return 3; // Small tablets
+    } else {
+      return 4; // Large tablets
+    }
+  }
+
+  double _getAspectRatio(double screenWidth) {
+    if (screenWidth < 600) {
+      return 0.72; // Phones
+    } else if (screenWidth < 900) {
+      return 0.70; // Small tablets
+    } else {
+      return 0.68; // Large tablets
+    }
+  }
+
+  double _getCardSpacing(double screenWidth) {
+    if (screenWidth < 600) {
+      return 12.0; // Phones
+    } else {
+      return 16.0; // Tablets
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final crossAxisCount = _getCrossAxisCount(screenWidth);
+    final aspectRatio = _getAspectRatio(screenWidth);
+    final spacing = _getCardSpacing(screenWidth);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
+            // Search Bar (no app bar)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Column(
@@ -277,10 +440,6 @@ String? _formatLastSeen(dynamic lastSeen) {
                     decoration: InputDecoration(
                       hintText: 'Search services...',
                       prefixIcon: const Icon(Icons.search),
-                      suffixIcon: IconButton(
-                        icon: Icon(_isMapView ? Icons.list : Icons.map),
-                        onPressed: () => setState(() => _isMapView = !_isMapView),
-                      ),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
@@ -292,7 +451,11 @@ String? _formatLastSeen(dynamic lastSeen) {
                         color: AppColors.surface,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withAlpha(13), blurRadius: 8, offset: const Offset(0, 2)),
+                          BoxShadow(
+                            color: Colors.black.withAlpha(13),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
                         ],
                       ),
                       constraints: const BoxConstraints(maxHeight: 200),
@@ -303,8 +466,14 @@ String? _formatLastSeen(dynamic lastSeen) {
                           final service = _searchResults[index];
                           return ListTile(
                             dense: true,
-                            title: Text(service['name'], style: const TextStyle(fontFamily: 'Inter')),
-                            subtitle: Text(service['category'], style: const TextStyle(fontFamily: 'Inter', fontSize: 12)),
+                            title: Text(
+                              service['name'],
+                              style: const TextStyle(fontFamily: 'Inter'),
+                            ),
+                            subtitle: Text(
+                              service['category'],
+                              style: const TextStyle(fontFamily: 'Inter', fontSize: 12),
+                            ),
                             onTap: () => _selectService(service),
                           );
                         },
@@ -313,38 +482,260 @@ String? _formatLastSeen(dynamic lastSeen) {
                 ],
               ),
             ),
+            
+            // Popular Services Chips
+            if (_popularServices.isNotEmpty || _isLoadingChips)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: _isLoadingChips
+                    ? const SizedBox(
+                        height: 32,
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      )
+                    : SizedBox(
+                        height: 36,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _popularServices.length,
+                          itemBuilder: (context, index) {
+                            final service = _popularServices[index];
+                            final isSelected = _selectedService == service['name'];
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: GestureDetector(
+                                onTap: () {
+                                  if (isSelected) {
+                                    _clearSelectedService();
+                                  } else {
+                                    _selectPopularService(service);
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? AppColors.primary
+                                        : AppColors.primary.withAlpha(20),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: isSelected
+                                        ? null
+                                        : Border.all(
+                                            color: AppColors.primary.withAlpha(40),
+                                          ),
+                                  ),
+                                  child: Text(
+                                    service['name'],
+                                    style: TextStyle(
+                                      fontFamily: 'Inter',
+                                      fontSize: 13,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                      color: isSelected ? Colors.white : AppColors.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            
+            // Selected service chip with clear
             if (_selectedService != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                 child: Row(
                   children: [
-                    const Text('Radius:', style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
-                    Expanded(
-                      child: Slider(
-                        value: _radiusKm, min: 1, max: 50, divisions: 49,
-                        label: '${_radiusKm.toInt()} km',
-                        onChanged: (value) {
-                          setState(() => _radiusKm = value);
-                          _findProviders();
-                        },
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withAlpha(20),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _selectedService!,
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: _clearSelectedService,
+                            child: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Text('${_radiusKm.toInt()} km', style: const TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
                   ],
                 ),
               ),
+
+            // Radius Slider + Filters
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Radius:',
+                        style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: _radiusKm,
+                          min: 1,
+                          max: 50,
+                          divisions: 49,
+                          label: '${_radiusKm.toInt()} km',
+                          onChanged: (value) {
+                            setState(() {
+                              _radiusKm = value;
+                            });
+                            _loadPopularServices();
+                            if (_selectedService != null) {
+                              _findProviders();
+                            }
+                          },
+                        ),
+                      ),
+                      Text(
+                        '${_radiusKm.toInt()} km',
+                        style: const TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      _buildFilterToggle(
+                        label: 'Online only',
+                        icon: Icons.wifi,
+                        value: _showOnlineOnly,
+                        onChanged: (val) {
+                          setState(() => _showOnlineOnly = val);
+                          if (_selectedService != null) _findProviders();
+                        },
+                      ),
+                      const SizedBox(width: 12),
+                      _buildFilterToggle(
+                        label: 'Premium only',
+                        icon: Icons.star,
+                        value: _showPremiumOnly,
+                        onChanged: (val) {
+                          setState(() => _showPremiumOnly = val);
+                          if (_selectedService != null) _findProviders();
+                        },
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: _clearAllFilters,
+                        style: TextButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        ),
+                        child: const Text(
+                          'Clear all',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            color: AppColors.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Results
             Expanded(
               child: _selectedService == null
                   ? const Center(
-                      child: Text('Search for a service to find providers near you.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
+                      child: Text(
+                        'Search for a service to find providers near you.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary),
+                      ),
                     )
                   : _isLoading && _providers.isEmpty
-                      ? _buildSkeletonGrid()
-                      : _isMapView
-                          ? _buildMapView()
-                          : _buildListView(),
+                      ? _buildSkeletonGrid(screenWidth)
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              child: Text(
+                                _providers.isEmpty
+                                    ? 'No providers found'
+                                    : '${_providers.length} provider${_providers.length > 1 ? 's' : ''} found near you',
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: _providers.isEmpty
+                                  ? const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(32),
+                                        child: Text(
+                                          'No providers found. Try expanding your radius or adjusting filters.',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontFamily: 'Inter',
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : GridView.builder(
+                                      padding: const EdgeInsets.all(16),
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: crossAxisCount,
+                                        childAspectRatio: aspectRatio,
+                                        crossAxisSpacing: spacing,
+                                        mainAxisSpacing: spacing,
+                                      ),
+                                      itemCount: _providers.length,
+                                      itemBuilder: (context, index) {
+                                        final p = _providers[index];
+                                        return ProviderCard(
+                                          name: p['name'],
+                                          photoUrl: p['photoUrl'],
+                                          isVerified: p['isVerified'],
+                                          isOnline: p['isOnline'],
+                                          services: List<String>.from(p['services']),
+                                          rating: p['rating'],
+                                          reviewCount: p['reviewCount'],
+                                          distanceKm: p['distanceKm'],
+                                          lastSeen: p['lastSeen'],
+                                          onTap: () => _handleProviderTap(p),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
             ),
           ],
         ),
@@ -352,197 +743,63 @@ String? _formatLastSeen(dynamic lastSeen) {
     );
   }
 
-  Widget _buildSkeletonGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
-      itemCount: 6,
-      itemBuilder: (_, _) => const ProviderCardSkeleton(),
-    );
-  }
-
-  Widget _buildMapView() {
-    if (_userLat == null || _userLng == null) return const Center(child: CircularProgressIndicator());
-
-    final points = <Map<String, dynamic>>[];
-    for (final p in _providers) {
-      final lat = p['latitude'] as double?;
-      final lng = p['longitude'] as double?;
-      if (lat != null && lng != null) {
-        points.add({'lat': lat, 'lng': lng, 'provider': p});
-      }
-    }
-
-    return FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: LatLng(_userLat!, _userLng!),
-        initialZoom: _radiusToZoom(_radiusKm),
-        onMapEvent: (event) => setState(() {}),
+  Widget _buildFilterToggle({
+    required String label,
+    required IconData icon,
+    required bool value,
+    required Function(bool) onChanged,
+  }) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: value ? AppColors.primary.withAlpha(20) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: value ? AppColors.primary : AppColors.primary.withAlpha(30),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: value ? AppColors.primary : AppColors.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                fontWeight: value ? FontWeight.w600 : FontWeight.w400,
+                color: value ? AppColors.primary : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
       ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.gigscourt',
-        ),
-        MarkerLayer(markers: _buildClusteredMarkers(points)),
-      ],
     );
   }
 
-List<Marker> _buildClusteredMarkers(List<Map<String, dynamic>> points) {
-  if (points.isEmpty) return [];
-
-  // ✅ FIX: Use null-aware operator with fallback zoom
-  final zoom = _mapController.camera.zoom;
-  final markers = <Marker>[];
-
-  if (zoom >= 14 || points.length <= 3) {
-    for (final point in points) {
-      final p = point['provider'] as Map<String, dynamic>;
-      markers.add(Marker(
-        point: LatLng(point['lat'] as double, point['lng'] as double),
-        width: 36, height: 36,
-        child: GestureDetector(
-          onTap: () => _handleProviderTap(p),
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
-                width: 3,
-              ),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: p['photoUrl'] != null
-                  ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
-                  : Container(
-                      width: 30, height: 30,
-                      color: AppColors.primary.withAlpha(51),
-                      child: Icon(Icons.person, size: 16, color: AppColors.primary),
-                    ),
-            ),
-          ),
-        ),
-      ));
-    }
-  } else {
-    final clusterRadius = _getClusterRadius(zoom);
-    final clusters = <String, List<Map<String, dynamic>>>{};
-
-    for (final point in points) {
-      final lat = point['lat'] as double;
-      final lng = point['lng'] as double;
-      final latKey = (lat / clusterRadius).round();
-      final lngKey = (lng / clusterRadius).round();
-      final key = '$latKey,$lngKey';
-      clusters.putIfAbsent(key, () => []);
-      clusters[key]!.add(point);
-    }
-
-    for (final entry in clusters.entries) {
-      final clusterPoints = entry.value;
-      if (clusterPoints.length == 1) {
-        final p = clusterPoints.first['provider'] as Map<String, dynamic>;
-        markers.add(Marker(
-          point: LatLng(clusterPoints.first['lat'] as double, clusterPoints.first['lng'] as double),
-          width: 36, height: 36,
-          child: GestureDetector(
-            onTap: () => _handleProviderTap(p),
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: p['isOnline'] == true ? AppColors.success : Colors.transparent,
-                  width: 3,
-                ),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: p['photoUrl'] != null
-                    ? Image.network(p['photoUrl'], width: 30, height: 30, fit: BoxFit.cover)
-                    : Container(
-                        width: 30, height: 30,
-                        color: AppColors.primary.withAlpha(51),
-                        child: Icon(Icons.person, size: 16, color: AppColors.primary),
-                      ),
-              ),
-            ),
-          ),
-        ));
-      } else {
-        final avgLat = clusterPoints.map((p) => p['lat'] as double).reduce((a, b) => a + b) / clusterPoints.length;
-        final avgLng = clusterPoints.map((p) => p['lng'] as double).reduce((a, b) => a + b) / clusterPoints.length;
-        markers.add(Marker(
-          point: LatLng(avgLat, avgLng),
-          width: 44, height: 44,
-          child: GestureDetector(
-            onTap: () => _mapController.move(LatLng(avgLat, avgLng), zoom + 2),
-            child: Container(
-              decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
-              child: Center(
-                child: Text(
-                  '${clusterPoints.length}',
-                  style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white),
-                ),
-              ),
-            ),
-          ),
-        ));
-      }
-    }
-  }
-  return markers;
-}
-
-
-  double _getClusterRadius(double zoom) {
-    if (zoom <= 8) return 2.0;
-    if (zoom <= 10) return 1.0;
-    if (zoom <= 12) return 0.5;
-    return 0.1;
-  }
-
-  Widget _buildListView() {
-    if (_providers.isEmpty) {
-      return const Center(
-        child: Text('No providers found. Try expanding your radius.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontFamily: 'Inter', color: AppColors.textSecondary)),
-      );
-    }
+  Widget _buildSkeletonGrid(double screenWidth) {
+    final crossAxisCount = _getCrossAxisCount(screenWidth);
+    final aspectRatio = _getAspectRatio(screenWidth);
+    final spacing = _getCardSpacing(screenWidth);
 
     return GridView.builder(
       padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2, childAspectRatio: 0.72, crossAxisSpacing: 12, mainAxisSpacing: 12),
-      itemCount: _providers.length,
-      itemBuilder: (context, index) {
-        final p = _providers[index];
-        return ProviderCard(
-          name: p['name'],
-          photoUrl: p['photoUrl'],
-          isVerified: p['isVerified'],
-          isOnline: p['isOnline'],
-          services: List<String>.from(p['services']),
-          rating: p['rating'],
-          reviewCount: p['reviewCount'],
-          distanceKm: p['distanceKm'],
-          lastSeen: p['lastSeen'],
-          onTap: () => _handleProviderTap(p),
-        );
-      },
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: aspectRatio,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+      ),
+      itemCount: 6,
+      itemBuilder: (context, index) => const ProviderCardSkeleton(),
     );
-  }
-
-  double _radiusToZoom(double radiusKm) {
-    if (radiusKm <= 2) return 15;
-    if (radiusKm <= 5) return 14;
-    if (radiusKm <= 10) return 13;
-    if (radiusKm <= 20) return 12;
-    if (radiusKm <= 30) return 11;
-    return 10;
   }
 }
