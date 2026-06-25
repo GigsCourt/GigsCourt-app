@@ -19,7 +19,7 @@ import 'screens/subscription_screen.dart';
 import 'screens/support_screen.dart';
 import 'screens/edit_profile_screen.dart';
 import 'screens/reviews_screen.dart';
-import 'screens/following_screen.dart';
+import 'screens/admin_screen.dart';
 import 'theme/app_theme.dart';
 import 'screens/verify_email_screen.dart';
 import 'screens/login_screen.dart';
@@ -182,6 +182,7 @@ class _GigsCourtAppState extends State<GigsCourtApp> with WidgetsBindingObserver
         '/verify-email': (context) => const VerifyEmailScreen(),
         '/setup': (context) => SetupScreen(),
         '/home': (context) => const MainShell(),
+        '/admin': (context) => const AdminScreen(),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/provider-profile') {
@@ -220,9 +221,6 @@ class _GigsCourtAppState extends State<GigsCourtApp> with WidgetsBindingObserver
           return MaterialPageRoute(
             builder: (context) => ReviewsScreen(providerId: providerId),
           );
-        }
-        if (settings.name == '/following') {
-          return MaterialPageRoute(builder: (context) => const FollowingScreen());
         }
         return null;
       },

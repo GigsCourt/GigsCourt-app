@@ -4,10 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/image_optimizer.dart';
@@ -24,14 +22,12 @@ class ProviderProfileScreen extends StatefulWidget {
 class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   final _supabase = Supabase.instance.client;
   final _currentUser = FirebaseAuth.instance.currentUser;
-  final _remoteConfig = FirebaseRemoteConfig.instance;
   Map<String, dynamic>? _userData;
   List<Map<String, dynamic>> _services = [];
   List<String> _workPhotos = [];
   bool _isLoading = true;
-  bool _isFollowing = false;
   bool _isEarlyAccess = false;
-  bool _isFollowLoading = false;
+  bool _isSaved = false;
 
   // Address + Distance from Supabase
   String _providerAddress = '';
@@ -60,7 +56,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _isEarlyAccess = !_remoteConfig.getBool('subscriptions_enforced');
+    _isEarlyAccess = false;
     _loadProfile();
     _listenToRealTimeUpdates();
   }
@@ -73,13 +69,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
 
   Future<void> _loadProfile() async {
     try {
-      // 1. Load user data from Firestore
       final userDocFuture = FirebaseFirestore.instance
           .collection('users')
           .doc(widget.providerId)
           .get();
 
-      final followingDocFuture = _currentUser != null
+      final savedFuture = _currentUser != null
           ? FirebaseFirestore.instance
               .collection('users')
               .doc(_currentUser.uid)
@@ -87,7 +82,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
           : Future.value(null);
 
       final userDoc = await userDocFuture;
-      final followingDoc = await followingDocFuture;
+      final savedDoc = await savedFuture;
 
       if (!userDoc.exists) {
         if (mounted) {
@@ -107,16 +102,14 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
             'service_ids': serviceIds,
           });
           services = List<Map<String, dynamic>>.from(namesData);
-        } catch (_) {
-          // Service fetch failed, show empty list
-        }
+        } catch (_) {}
       }
 
-      // Check following status
-      bool isFollowing = false;
-      if (followingDoc != null && followingDoc.exists) {
-        final following = List<String>.from(followingDoc.data()?['following'] ?? []);
-        isFollowing = following.contains(widget.providerId);
+      // Check if saved
+      bool isSaved = false;
+      if (savedDoc != null && savedDoc.exists) {
+        final savedProviders = List<String>.from(savedDoc.data()?['savedProviders'] ?? []);
+        isSaved = savedProviders.contains(widget.providerId);
       }
 
       if (mounted) {
@@ -124,12 +117,11 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
           _userData = userData;
           _services = services;
           _workPhotos = List<String>.from(userData['workPhotos'] ?? []);
-          _isFollowing = isFollowing;
+          _isSaved = isSaved;
           _isLoading = false;
         });
       }
 
-      // 3. Load address + distance in background
       _loadProviderLocation();
     } catch (e) {
       if (mounted) {
@@ -179,7 +171,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         return;
       }
 
-      // Position is guaranteed to have a value here
       try {
         final result = await _supabase
             .rpc('find_all_providers', params: {
@@ -246,9 +237,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
           });
         }
       }
-    } catch (_) {
-      // Address fetch failed
-    }
+    } catch (_) {}
   }
 
   void _listenToRealTimeUpdates() {
@@ -258,18 +247,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         .snapshots()
         .listen((doc) {
       if (doc.exists && mounted) {
-        final data = doc.data()!;
-        setState(() {
-          // Update user data
-          _userData = data;
-          
-          // Update services if they changed
-          final newServiceIds = List<int>.from(data['services'] ?? []);
-          if (newServiceIds.isNotEmpty) {
-            // Fetch updated service names (simplified: keep existing names)
-            // In production, you'd re-fetch from Supabase here
-          }
-        });
+        setState(() => _userData = doc.data());
       }
     });
   }
@@ -282,98 +260,53 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   bool get _canShowOnlineStatus =>
       _isEarlyAccess || _isSubscribed;
 
-  bool get _isOnline =>
-      _userData?['isOnline'] ?? false;
-
-  String? get _lastSeen {
-    final lastSeen = _userData?['lastSeen'];
-    if (lastSeen == null) return null;
-    final date = (lastSeen as Timestamp).toDate();
-    final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
-
   bool get _canContact {
     if (_isEarlyAccess) return true;
     final status = _userData?['subscriptionStatus'] ?? 'free';
     return status == 'free' || status == 'premium';
   }
 
-  bool get _canViewReviews {
-    if (_isEarlyAccess) return true;
-    return _isSubscribed;
-  }
+  // ========== SAVE / UNSAVE ==========
 
-  // ========== TOGGLE FOLLOW (WITH OPTIMISTIC UI + LOADING STATE) ==========
-
-  Future<void> _toggleFollow() async {
-    if (_currentUser == null || _isFollowLoading) return;
-
-    final bool wasFollowing = _isFollowing;
-    final int currentCount = _userData?['followerCount'] ?? 0;
-
-    // --- OPTIMISTIC UI UPDATE (immediate) ---
-    setState(() {
-      _isFollowLoading = true;
-      _isFollowing = !_isFollowing;
-      _userData!['followerCount'] = wasFollowing ? currentCount - 1 : currentCount + 1;
-    });
+  Future<void> _toggleSave() async {
+    if (_currentUser == null) return;
 
     final userRef = FirebaseFirestore.instance.collection('users').doc(_currentUser.uid);
-    final providerRef = FirebaseFirestore.instance.collection('users').doc(widget.providerId);
+
+    setState(() {
+      _isSaved = !_isSaved;
+    });
 
     try {
-      // --- ATOMIC BATCH WRITE ---
-      final batch = FirebaseFirestore.instance.batch();
-
-      if (wasFollowing) {
-        // UNFOLLOW
-        batch.update(userRef, {
-          'following': FieldValue.arrayRemove([widget.providerId]),
-        });
-        batch.update(providerRef, {
-          'followerCount': FieldValue.increment(-1),
+      if (_isSaved) {
+        await userRef.update({
+          'savedProviders': FieldValue.arrayUnion([widget.providerId]),
         });
       } else {
-        // FOLLOW
-        batch.update(userRef, {
-          'following': FieldValue.arrayUnion([widget.providerId]),
-        });
-        batch.update(providerRef, {
-          'followerCount': FieldValue.increment(1),
+        await userRef.update({
+          'savedProviders': FieldValue.arrayRemove([widget.providerId]),
         });
       }
-
-      await batch.commit();
-
-      if (mounted) {
-        setState(() {
-          _isFollowLoading = false;
-        });
-      }
-
     } catch (e) {
-      // --- REVERT ON FAILURE ---
+      // Revert on failure
+      setState(() {
+        _isSaved = !_isSaved;
+      });
       if (mounted) {
-        setState(() {
-          _isFollowing = wasFollowing;
-          _userData!['followerCount'] = currentCount;
-          _isFollowLoading = false;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update follow status. Please try again.')),
+          const SnackBar(content: Text('Failed to update saved providers.')),
         );
       }
     }
   }
 
-  // ========== OTHER FUNCTIONS ==========
+  // ========== CHAT ==========
 
   Future<void> _startChat() async {
-    if (_currentUser == null || !_canContact) return;
+    if (_currentUser == null || !_canContact) {
+      _showLockedToast();
+      return;
+    }
 
     final existingChat = await FirebaseFirestore.instance
         .collection('chats')
@@ -438,16 +371,16 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     } catch (_) {}
   }
 
-  Future<void> _callProvider() async {
-    if (!_canContact) return;
-    final phone = _userData?['phone'];
-    if (phone != null) {
-      final url = Uri.parse('tel:$phone');
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url);
-      }
-    }
+  void _showLockedToast() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This provider is not currently accepting new clients.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
+
+  // ========== REPORT ==========
 
   Future<void> _reportProvider() async {
     final reason = await showDialog<String>(
@@ -495,15 +428,6 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     }
   }
 
-  void _showLockedToast() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('This provider is not currently accepting new clients.'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
   // ========== BUILD ==========
 
   @override
@@ -514,7 +438,11 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     if (_isLoading) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(backgroundColor: AppColors.primary),
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          title: const Text('Profile',
+              style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+        ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -536,8 +464,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     final bio = _userData!['bio'] ?? '';
     final photoUrl = _userData!['photoUrl'];
     final rating = (_userData!['averageRating'] ?? 0.0).toDouble();
-    final followerCount = _userData!['followerCount'] ?? 0;
-    final followingCount = _userData!['followingCount'] ?? 0;
+    final reviewCount = _userData!['reviewCount'] ?? 0;
+    final isOnline = _userData?['isOnline'] ?? false;
+    final lastSeen = _userData?['lastSeen'];
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -547,13 +476,20 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
           name,
           style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flag_outlined),
+            tooltip: 'Report',
+            onPressed: _reportProvider,
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Profile Photo
+            // ========== PROFILE PHOTO ==========
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(80),
@@ -580,37 +516,39 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Name + Verified Badge
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Flexible(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w700,
-                      fontSize: fontSize + 9,
-                      color: AppColors.textPrimary,
+            // ========== NAME + VERIFIED BADGE ==========
+            Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w700,
+                        fontSize: fontSize + 9,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
-                ),
-                if (_isSubscribed) ...[
-                  const SizedBox(width: 6),
-                  SvgPicture.asset(
-                    'assets/icons/verified.svg',
-                    width: 20,
-                    height: 20,
-                    colorFilter: const ColorFilter.mode(AppColors.accent, BlendMode.srcIn),
-                  ),
+                  if (_isSubscribed) ...[
+                    const SizedBox(width: 6),
+                    SvgPicture.asset(
+                      'assets/icons/verified.svg',
+                      width: 20,
+                      height: 20,
+                      colorFilter: const ColorFilter.mode(AppColors.accent, BlendMode.srcIn),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
             const SizedBox(height: 4),
 
-            // Online Status
+            // ========== ONLINE / LAST SEEN ==========
             if (_canShowOnlineStatus) ...[
               Center(
                 child: Row(
@@ -620,19 +558,19 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: _isOnline ? AppColors.success : AppColors.textSecondary,
+                        color: isOnline ? AppColors.success : AppColors.textSecondary,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      _isOnline
+                      isOnline
                           ? 'Online now'
-                          : 'Last seen ${_lastSeen ?? "recently"}',
+                          : _formatLastSeen(lastSeen),
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: fontSize,
-                        color: _isOnline ? AppColors.success : AppColors.textSecondary,
+                        color: isOnline ? AppColors.success : AppColors.textSecondary,
                       ),
                     ),
                   ],
@@ -641,47 +579,80 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // Stats (Rating, Followers, Following)
+            // ========== STATS ROW ==========
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildStat(
-                  rating.toStringAsFixed(1),
-                  'Reviews',
-                  _canViewReviews
-                      ? () => Navigator.of(context).pushNamed(
-                          '/reviews',
-                          arguments: widget.providerId,
-                        )
-                      : null,
-                  fontSize,
+                _buildStat(rating.toStringAsFixed(1), 'Rating'),
+                _buildDivider(),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).pushNamed(
+                      '/reviews',
+                      arguments: widget.providerId,
+                    );
+                  },
+                  child: _buildStat('$reviewCount', 'Reviews'),
                 ),
-                _buildDivider(),
-                _buildStat('$followerCount', 'Followers', null, fontSize),
-                _buildDivider(),
-                _buildStat('$followingCount', 'Following', null, fontSize),
               ],
             ),
             const SizedBox(height: 16),
 
-            // Bio
+            // ========== BIO (CENTERED) ==========
             if (bio.isNotEmpty) ...[
-              Text(
-                bio,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: fontSize + 2,
-                  color: AppColors.textPrimary,
-                  height: 1.5,
+              Center(
+                child: Text(
+                  bio,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: fontSize + 2,
+                    color: AppColors.textPrimary,
+                    height: 1.5,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
             ],
 
-            // Address (from Supabase)
+            // ========== SERVICES (CENTERED) ==========
+            if (_services.isNotEmpty) ...[
+              Center(
+                child: const Text(
+                  'Services',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _services.map((service) {
+                    return Chip(
+                      label: Text(
+                        service['name'],
+                        style: TextStyle(fontFamily: 'Inter', fontSize: fontSize),
+                      ),
+                      backgroundColor: AppColors.primary.withAlpha(20),
+                      side: BorderSide.none,
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // ========== ADDRESS ==========
             if (_providerAddress.isNotEmpty) ...[
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SvgPicture.asset(
                     'assets/icons/map_pin.svg',
@@ -693,14 +664,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _providerAddress,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: fontSize + 1,
-                        color: AppColors.textSecondary,
-                      ),
+                  Text(
+                    _providerAddress,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: fontSize + 1,
+                      color: AppColors.textSecondary,
                     ),
                   ),
                 ],
@@ -708,9 +677,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 4),
             ],
 
-            // Distance (from GPS + find_all_providers)
+            // ========== DISTANCE ==========
             if (_distanceKm != null) ...[
               Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(
                     Icons.straighten,
@@ -731,6 +701,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 16),
             ] else if (_isDistanceLoading) ...[
               Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(
                     Icons.straighten,
@@ -753,70 +724,60 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               const SizedBox(height: 12),
             ],
 
-            // Services
-            if (_services.isNotEmpty) ...[
-              const Text(
-                'Services',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _services.map((service) {
-                  return Chip(
-                    label: Text(
-                      service['name'],
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: fontSize,
-                      ),
-                    ),
-                    backgroundColor: AppColors.primary.withAlpha(20),
-                    side: BorderSide.none,
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            // Action Buttons (Follow, Chat, Call)
+            // ========== CHAT + SAVE BUTTONS ==========
             Row(
               children: [
                 Expanded(
-                  child: _buildButton(
-                    _isFollowing ? 'Following' : 'Follow',
-                    _isFollowing ? Icons.person : Icons.person_add_outlined,
-                    _toggleFollow,
-                    isLoading: _isFollowLoading,
+                  child: OutlinedButton(
+                    onPressed: _canContact ? _startChat : _showLockedToast,
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.primary),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text(
+                      'Chat',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildButton(
-                    'Chat',
-                    Icons.chat_bubble_outline,
-                    _canContact ? _startChat : _showLockedToast,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildButton(
-                    'Call',
-                    Icons.call_outlined,
-                    _canContact ? _callProvider : _showLockedToast,
+                  child: OutlinedButton(
+                    onPressed: _toggleSave,
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                        color: _isSaved ? AppColors.primary : AppColors.primary.withAlpha(51),
+                      ),
+                      backgroundColor: _isSaved ? AppColors.primary.withAlpha(20) : Colors.transparent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: Text(
+                      _isSaved ? 'Saved' : 'Save',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: _isSaved ? AppColors.primary : AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 24),
 
-            // Work Photos
+            // ========== WORK PHOTOS ==========
             if (_workPhotos.isNotEmpty) ...[
               const Text(
                 'Work Photos',
@@ -839,10 +800,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                 itemCount: _workPhotos.length,
                 itemBuilder: (context, index) {
                   return ClipRRect(
-                    borderRadius: _getPhotoBorderRadius(
-                      index,
-                      _workPhotos.length,
-                    ),
+                    borderRadius: _getPhotoBorderRadius(index, _workPhotos.length),
                     child: Image.network(
                       ImageOptimizer.thumbnail(_workPhotos[index]),
                       fit: BoxFit.cover,
@@ -858,52 +816,35 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               ),
               const SizedBox(height: 20),
             ],
-
-            // Report Provider
-            Center(
-              child: GestureDetector(
-                onTap: _reportProvider,
-                child: const Text(
-                  'Report Provider',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStat(String value, String label, VoidCallback? onTap, double fontSize) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontWeight: FontWeight.w700,
-              fontSize: fontSize + 5,
-              color: AppColors.textPrimary,
-            ),
+  // ========== WIDGET HELPERS ==========
+
+  Widget _buildStat(String value, String label) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            color: AppColors.textPrimary,
           ),
-          Text(
-            label,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: fontSize - 1,
-              color: AppColors.textSecondary,
-            ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 12,
+            color: AppColors.textSecondary,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -916,44 +857,14 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     );
   }
 
-  Widget _buildButton(
-    String label,
-    IconData icon,
-    VoidCallback onTap, {
-    bool isLoading = false,
-  }) {
-    return SizedBox(
-      height: 44,
-      child: ElevatedButton.icon(
-        onPressed: isLoading ? null : onTap,
-        icon: isLoading
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : Icon(icon, size: 18),
-        label: Text(
-          label,
-          style: const TextStyle(
-            fontFamily: 'Inter',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
-      ),
-    );
+  String _formatLastSeen(dynamic lastSeen) {
+    if (lastSeen == null) return 'Offline';
+    final date = (lastSeen as Timestamp).toDate();
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 
   BorderRadius _getPhotoBorderRadius(int index, int total) {
