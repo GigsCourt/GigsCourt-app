@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import '../../theme/app_theme.dart';
@@ -9,11 +8,13 @@ import '../../theme/app_theme.dart';
 class StepAddress extends StatefulWidget {
   final TextEditingController addressController;
   final Function(LatLng location, String address) onAddressChanged;
+  final bool isOptional;
 
   const StepAddress({
     super.key,
     required this.addressController,
     required this.onAddressChanged,
+    this.isOptional = false,
   });
 
   @override
@@ -24,8 +25,25 @@ class _StepAddressState extends State<StepAddress> {
   LatLng? _currentLocation;
   bool _isLoadingLocation = true;
   bool _isResolvingAddress = false;
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
   Timer? _debounceTimer;
+  LatLng? _lastCameraPosition;
+
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(BuildContext context, double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.85;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  double _getPadding(BuildContext context, double basePadding) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return basePadding * 0.8;
+    if (screenWidth > 600) return basePadding * 1.2;
+    return basePadding;
+  }
 
   @override
   void initState() {
@@ -36,6 +54,7 @@ class _StepAddressState extends State<StepAddress> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _mapController?.dispose();
     super.dispose();
   }
 
@@ -64,10 +83,23 @@ class _StepAddressState extends State<StepAddress> {
         _currentLocation = LatLng(position.latitude, position.longitude);
         _isLoadingLocation = false;
       });
-      _mapController.move(_currentLocation!, 14);
+      _moveMap(_currentLocation!);
       _resolveAddress(_currentLocation!);
     } catch (e) {
       setState(() => _isLoadingLocation = false);
+    }
+  }
+
+  void _moveMap(LatLng location) {
+    if (_mapController != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: location,
+            zoom: 14,
+          ),
+        ),
+      );
     }
   }
 
@@ -76,7 +108,7 @@ class _StepAddressState extends State<StepAddress> {
     widget.onAddressChanged(point, widget.addressController.text);
 
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(seconds: 1), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       _resolveAddress(point);
     });
   }
@@ -104,31 +136,40 @@ class _StepAddressState extends State<StepAddress> {
 
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(context, 16.0);
+    final padding = _getPadding(context, 16.0);
+    final titleSize = _getFontSize(context, 24.0);
+
     if (_isLoadingLocation) {
       return const Center(child: CircularProgressIndicator());
     }
 
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _currentLocation ?? const LatLng(9.082, 8.675),
-            initialZoom: 14.0,
-            onTap: (tapPosition, point) => _onMapChanged(point),
-            onMapEvent: (event) {
-              if (event is MapEventMoveEnd) {
-                final center = _mapController.camera.center;
-                _onMapChanged(center);
-              }
-            },
+        GoogleMap(
+          onMapCreated: (controller) {
+            _mapController = controller;
+            if (_currentLocation != null) {
+              _moveMap(_currentLocation!);
+            }
+          },
+          initialCameraPosition: CameraPosition(
+            target: _currentLocation ?? const LatLng(9.082, 8.675),
+            zoom: 14,
           ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.example.gigscourt',
-            ),
-          ],
+          onTap: (point) => _onMapChanged(point),
+          onCameraMove: (position) {
+            _lastCameraPosition = position.target;
+          },
+          onCameraIdle: () {
+            if (_lastCameraPosition != null) {
+              _onMapChanged(_lastCameraPosition!);
+            }
+          },
+          myLocationEnabled: true,
+          myLocationButtonEnabled: true,
+          zoomControlsEnabled: true,
+          mapType: MapType.normal,
         ),
 
         IgnorePointer(
@@ -136,10 +177,10 @@ class _StepAddressState extends State<StepAddress> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
+                Icon(
                   Icons.location_pin,
                   color: AppColors.primary,
-                  size: 40,
+                  size: 48,
                 ),
                 Container(
                   width: 4,
@@ -155,11 +196,11 @@ class _StepAddressState extends State<StepAddress> {
         ),
 
         Positioned(
-          left: 16,
-          right: 16,
-          bottom: 16,
+          left: padding,
+          right: padding,
+          bottom: padding + 60,
           child: Container(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(padding),
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(12),
@@ -180,7 +221,7 @@ class _StepAddressState extends State<StepAddress> {
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                    fontSize: titleSize,
                     color: AppColors.textPrimary,
                   ),
                 ),
@@ -189,32 +230,47 @@ class _StepAddressState extends State<StepAddress> {
                   'Drag the map to set your workspace',
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 12,
+                    fontSize: fontSize,
                     color: AppColors.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: widget.addressController,
+                  style: TextStyle(fontSize: fontSize),
                   decoration: InputDecoration(
-                    labelText: 'Workspace address',
+                    labelText: widget.isOptional ? 'Workspace address (Optional)' : 'Workspace address',
                     hintText: 'Enter your workspace address',
-                    helperText: 'You can edit if incorrect',
-                    helperMaxLines: 1,
+                    helperText: widget.isOptional
+                        ? 'If you don\'t add your workspace address, you won\'t be discoverable by clients nearby.'
+                        : 'You can edit if incorrect',
+                    helperMaxLines: 2,
+                    labelStyle: TextStyle(fontSize: fontSize),
+                    hintStyle: TextStyle(fontSize: fontSize),
+                    helperStyle: TextStyle(
+                      fontSize: fontSize - 2,
+                      color: widget.isOptional ? AppColors.accent : AppColors.textSecondary,
+                    ),
                     suffixIcon: _isResolvingAddress
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 20,
                             height: 20,
                             child: Padding(
-                              padding: EdgeInsets.all(12),
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              padding: const EdgeInsets.all(12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary,
+                              ),
                             ),
                           )
                         : null,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: fontSize + 4,
+                    ),
                   ),
                 ),
               ],

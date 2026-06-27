@@ -12,6 +12,24 @@ class VerifyEmailScreen extends StatefulWidget {
 class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   bool _isResending = false;
 
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.85;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  double _getPadding(double basePadding) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return basePadding * 0.8;
+    if (screenWidth > 600) return basePadding * 1.2;
+    return basePadding;
+  }
+
+  // ========== AUTH FUNCTIONS ==========
+
   Future<void> _checkEmailVerified() async {
     await FirebaseAuth.instance.currentUser?.reload();
     final isVerified = FirebaseAuth.instance.currentUser?.emailVerified ?? false;
@@ -48,8 +66,12 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     }
   }
 
+  // ========== BUILD ==========
+
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(16.0);
+    final padding = _getPadding(32.0);
     final email = FirebaseAuth.instance.currentUser?.email ?? 'your email';
 
     return Scaffold(
@@ -57,11 +79,11 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       body: SafeArea(
         child: Center(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: EdgeInsets.symmetric(horizontal: padding),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
+                Icon(
                   Icons.email_outlined,
                   size: 80,
                   color: AppColors.primary,
@@ -72,7 +94,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w700,
-                    fontSize: 24,
+                    fontSize: fontSize + 8,
                     color: AppColors.textPrimary,
                   ),
                 ),
@@ -83,7 +105,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w400,
-                    fontSize: 16,
+                    fontSize: fontSize,
                     color: AppColors.textSecondary,
                     height: 1.5,
                   ),
@@ -102,12 +124,12 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                       ),
                       elevation: 0,
                     ),
-                    child: const Text(
+                    child: Text(
                       'I\'ve Verified My Email',
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontWeight: FontWeight.w600,
-                        fontSize: 16,
+                        fontSize: fontSize,
                       ),
                     ),
                   ),
@@ -116,16 +138,20 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                 TextButton(
                   onPressed: _isResending ? null : _resendEmail,
                   child: _isResending
-                      ? const SizedBox(
+                      ? SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
                         )
                       : Text(
                           'Resend Email',
                           style: TextStyle(
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.w500,
+                            fontSize: fontSize - 2,
                             color: AppColors.primary,
                           ),
                         ),
@@ -138,6 +164,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                     style: TextStyle(
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w500,
+                      fontSize: fontSize - 2,
                       color: AppColors.textSecondary,
                     ),
                   ),

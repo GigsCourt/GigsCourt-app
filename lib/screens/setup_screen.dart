@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../theme/app_theme.dart';
 import 'setup/step_photo.dart';
 import 'setup/step_personal_info.dart';
@@ -22,6 +22,14 @@ class _SetupScreenState extends State<SetupScreen> {
   int _currentStep = 0;
   final int _totalSteps = 5;
 
+  final List<String> _stepTitles = [
+    'Profile Photo',
+    'Personal Info',
+    'Address',
+    'Select Services',
+    'How It Works',
+  ];
+
   String? _photoUrl;
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
@@ -29,6 +37,22 @@ class _SetupScreenState extends State<SetupScreen> {
   LatLng? _location;
   List<Map<String, dynamic>> _selectedServices = [];
   bool _isSaving = false;
+
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.85;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  double _getPadding(double basePadding) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return basePadding * 0.8;
+    if (screenWidth > 600) return basePadding * 1.2;
+    return basePadding;
+  }
 
   @override
   void initState() {
@@ -44,17 +68,19 @@ class _SetupScreenState extends State<SetupScreen> {
   String get _bio => _bioController.text.trim();
   String _address = '';
 
+  // ========== VALIDATION ==========
+
   bool get _canProceedFromCurrentStep {
     switch (_currentStep) {
-      case 0:
+      case 0: // Profile Photo — REQUIRED
         return _photoUrl != null;
-      case 1:
-        return _name.isNotEmpty && _bio.isNotEmpty;
-      case 2:
-        return _location != null && _address.trim().isNotEmpty;
-      case 3:
-        return _selectedServices.isNotEmpty;
-      case 4:
+      case 1: // Personal Info — Name REQUIRED, Bio OPTIONAL
+        return _name.isNotEmpty;
+      case 2: // Address — OPTIONAL
+        return true;
+      case 3: // Services — OPTIONAL
+        return true;
+      case 4: // How It Works — INFO ONLY
         return true;
       default:
         return false;
@@ -76,7 +102,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   void _goToNextStep() {
     _dismissKeyboard();
-    
+
     if (!_canProceedFromCurrentStep) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete this step before continuing.')),
@@ -101,6 +127,8 @@ class _SetupScreenState extends State<SetupScreen> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
+    } else {
+      Navigator.of(context).pushReplacementNamed('/wizard');
     }
   }
 
@@ -110,37 +138,51 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser!;
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      // Build user data
+      final Map<String, dynamic> userData = {
         'displayName': _name,
-        'bio': _bio,
         'photoUrl': _photoUrl,
         'email': user.email,
         'isSetupComplete': true,
-        'services': _selectedServices.map((s) => s['id']).toList(),
         'workPhotos': [],
         'subscriptionStatus': 'free',
         'leadCount': 0,
         'reviewCount': 0,
         'averageRating': 0.0,
         'lastReviewedAt': null,
-        'followerCount': 0,
-        'followingCount': 0,
-        'following': [],
         'pushNotifications': true,
         'emailNotifications': true,
         'isOnline': false,
         'lastSeen': null,
         'phone': null,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      await Supabase.instance.client.rpc('upsert_provider_location', params: {
-        'p_user_id': user.uid,
-        'p_latitude': _location!.latitude,
-        'p_longitude': _location!.longitude,
-        'p_address': _address,
-      });
+      // Only add bio if provided
+      if (_bio.isNotEmpty) {
+        userData['bio'] = _bio;
+      }
 
+      // Only add services if selected
+      if (_selectedServices.isNotEmpty) {
+        userData['services'] = _selectedServices.map((s) => s['id']).toList();
+      } else {
+        userData['services'] = [];
+      }
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(userData);
+
+      // Only save address if provided
+      if (_location != null && _address.trim().isNotEmpty) {
+        await Supabase.instance.client.rpc('upsert_provider_location', params: {
+          'p_user_id': user.uid,
+          'p_latitude': _location!.latitude,
+          'p_longitude': _location!.longitude,
+          'p_address': _address,
+        });
+      }
+
+      // Only save services if selected
       for (final service in _selectedServices) {
         await Supabase.instance.client.rpc('add_user_service', params: {
           'p_user_id': user.uid,
@@ -165,6 +207,9 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(14.0);
+    final padding = _getPadding(24.0);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -173,31 +218,43 @@ class _SetupScreenState extends State<SetupScreen> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        if (_currentStep > 0)
-                          GestureDetector(
-                            onTap: _goToPreviousStep,
-                            child: Icon(Icons.arrow_back,
-                                color: AppColors.textPrimary, size: 24),
+                        GestureDetector(
+                          onTap: _goToPreviousStep,
+                          child: Icon(
+                            Icons.arrow_back,
+                            color: AppColors.textPrimary,
+                            size: fontSize + 10,
                           ),
+                        ),
                         const Spacer(),
                         Text(
                           'Step ${_currentStep + 1} of $_totalSteps',
                           style: TextStyle(
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.w500,
-                            fontSize: 14,
+                            fontSize: fontSize,
                             color: AppColors.textSecondary,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
+                    Text(
+                      _stepTitles[_currentStep],
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w700,
+                        fontSize: fontSize + 6,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
@@ -229,6 +286,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     StepPersonalInfo(
                       nameController: _nameController,
                       bioController: _bioController,
+                      isBioOptional: true,
                     ),
                     StepAddress(
                       addressController: _addressController,
@@ -237,6 +295,7 @@ class _SetupScreenState extends State<SetupScreen> {
                           _location = location;
                         });
                       },
+                      isOptional: true,
                     ),
                     StepServices(
                       onServicesChanged: (services) {
@@ -244,6 +303,7 @@ class _SetupScreenState extends State<SetupScreen> {
                           _selectedServices = services;
                         });
                       },
+                      isOptional: true,
                     ),
                     const StepHowItWorks(),
                   ],
@@ -251,7 +311,7 @@ class _SetupScreenState extends State<SetupScreen> {
               ),
 
               Padding(
-                padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+                padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
                 child: SizedBox(
                   width: double.infinity,
                   height: 56,
@@ -266,7 +326,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       elevation: 0,
                     ),
                     child: _isSaving
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(
@@ -278,10 +338,10 @@ class _SetupScreenState extends State<SetupScreen> {
                             _currentStep == _totalSteps - 1
                                 ? 'Get Started'
                                 : 'Continue',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontFamily: 'Inter',
                               fontWeight: FontWeight.w600,
-                              fontSize: 16,
+                              fontSize: fontSize + 2,
                             ),
                           ),
                   ),

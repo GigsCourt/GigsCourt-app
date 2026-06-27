@@ -1,0 +1,16 @@
+ext.dartEnvironmentVariables = [:]
+
+if (project.hasProperty("dart-defines")) {
+    project.property("dart-defines").split(",").each { entry ->
+        def decoded = new String(entry.decodeBase64(), "UTF-8")
+        def pair = decoded.split("=", 2)
+        if (pair.length == 2) {
+            def key = pair[0]
+            def lowercaseKey = key.toLowerCase()
+            // Filter out Flutter framework variables
+            if (!lowercaseKey.startsWith("flutter")) {
+                dartEnvironmentVariables[key] = pair[1]
+            }
+        }
+    }
+}

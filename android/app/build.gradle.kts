@@ -7,6 +7,25 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// ✅ Load dart-define values
+val dartEnvironmentVariables = mutableMapOf<String, String>()
+
+if (project.hasProperty("dart-defines")) {
+    val dartDefines = project.property("dart-defines") as String
+    dartDefines.split(",").forEach { entry ->
+        val decoded = String(android.util.Base64.decode(entry, android.util.Base64.DEFAULT))
+        val pair = decoded.split("=", limit = 2)
+        if (pair.size == 2) {
+            val key = pair[0]
+            val lowercaseKey = key.lowercase()
+            // Filter out Flutter framework variables
+            if (!lowercaseKey.startsWith("flutter")) {
+                dartEnvironmentVariables[key] = pair[1]
+            }
+        }
+    }
+}
+
 android {
     namespace = "com.example.gigscourt"
     compileSdk = flutter.compileSdkVersion
@@ -26,6 +45,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // ✅ Pass Google Maps API key to AndroidManifest.xml
+        manifestPlaceholders["googleMapsApiKeyAndroid"] = dartEnvironmentVariables["GOOGLE_MAPS_API_KEY_ANDROID"] ?: ""
     }
 
     buildTypes {

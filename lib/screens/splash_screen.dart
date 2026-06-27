@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -13,6 +14,7 @@ class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _fadeScaleAnimation;
+  bool _isEarlyAccess = false;
 
   @override
   void initState() {
@@ -33,6 +35,21 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
+    // Fetch Remote Config before navigating
+    _loadRemoteConfig();
+  }
+
+  Future<void> _loadRemoteConfig() async {
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      await remoteConfig.fetchAndActivate();
+      _isEarlyAccess = !remoteConfig.getBool('subscriptions_enforced');
+    } catch (e) {
+      // Default to Early Access if Remote Config fails
+      _isEarlyAccess = true;
+    }
+
+    // Wait for animation to complete before navigating
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         _navigateToNext();
@@ -43,6 +60,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToNext() async {
     final user = FirebaseAuth.instance.currentUser;
 
+    // ========== 1. NO USER → WIZARD ==========
     if (user == null) {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/wizard');
@@ -50,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
-    // Validate session is still valid on server
+    // ========== 2. VALIDATE TOKEN ==========
     try {
       await user.getIdToken(true);
     } catch (e) {
@@ -61,6 +79,7 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
+    // ========== 3. EMAIL NOT VERIFIED → VERIFY EMAIL ==========
     if (!user.emailVerified) {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/verify-email');
@@ -68,20 +87,38 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
+    // ========== 4. CHECK SETUP COMPLETION ==========
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (mounted) {
-        if (doc.exists && doc.data()?['isSetupComplete'] == true) {
-          Navigator.of(context).pushReplacementNamed('/home');
-        } else {
+      if (!doc.exists) {
+        // User document doesn't exist → go to setup
+        if (mounted) {
           Navigator.of(context).pushReplacementNamed('/setup');
         }
+        return;
       }
+
+      final isSetupComplete = doc.data()?['isSetupComplete'] ?? false;
+
+      if (!isSetupComplete) {
+        // Setup not completed → go to setup
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/setup');
+        }
+        return;
+      }
+
+      // ========== 5. ALL CHECKS PASSED → HOME ==========
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+
     } catch (e) {
+      // Error fetching user document → go to setup (safest fallback)
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/setup');
       }
@@ -127,6 +164,25 @@ class _SplashScreenState extends State<SplashScreen>
                     letterSpacing: 0.5,
                   ),
                 ),
+                if (_isEarlyAccess) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(30),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      '🚀 Early Access',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

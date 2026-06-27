@@ -5,8 +5,13 @@ import '../../data/services_data.dart';
 
 class StepServices extends StatefulWidget {
   final Function(List<Map<String, dynamic>>) onServicesChanged;
+  final bool isOptional;
 
-  const StepServices({super.key, required this.onServicesChanged});
+  const StepServices({
+    super.key,
+    required this.onServicesChanged,
+    this.isOptional = false,
+  });
 
   @override
   State<StepServices> createState() => _StepServicesState();
@@ -20,6 +25,22 @@ class _StepServicesState extends State<StepServices> {
   List<Map<String, dynamic>> _filteredServices = [];
   bool _isLoading = true;
   String? _expandedCategory;
+
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(BuildContext context, double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.85;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  double _getPadding(BuildContext context, double basePadding) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return basePadding * 0.8;
+    if (screenWidth > 600) return basePadding * 1.2;
+    return basePadding;
+  }
 
   @override
   void initState() {
@@ -76,10 +97,13 @@ class _StepServicesState extends State<StepServices> {
 
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(context, 16.0);
+    final padding = _getPadding(context, 32.0);
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
+          padding: EdgeInsets.symmetric(horizontal: padding),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -88,30 +112,48 @@ class _StepServicesState extends State<StepServices> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w700,
-                  fontSize: 24,
+                  fontSize: fontSize + 8,
                   color: AppColors.textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Select at least one service',
+                widget.isOptional
+                    ? 'Select services you offer (optional)'
+                    : 'Select at least one service',
                 style: TextStyle(
                   fontFamily: 'Inter',
-                  fontSize: 16,
+                  fontSize: fontSize,
                   color: AppColors.textSecondary,
                 ),
               ),
+              if (widget.isOptional) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'If you don\'t select any services, you won\'t be discoverable by clients searching for your skills.',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: fontSize - 2,
+                    color: AppColors.accent,
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               TextField(
                 controller: _searchController,
                 onChanged: _filterServices,
+                style: TextStyle(fontSize: fontSize),
                 decoration: InputDecoration(
                   hintText: 'Search services...',
+                  hintStyle: TextStyle(fontSize: fontSize),
                   prefixIcon: const Icon(Icons.search),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: fontSize + 4,
+                  ),
                 ),
               ),
             ],
@@ -132,22 +174,23 @@ class _StepServicesState extends State<StepServices> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: 'Inter',
+                            fontSize: fontSize,
                             color: AppColors.textSecondary,
                           ),
                         ),
                       ),
                     )
                   : _searchController.text.isNotEmpty
-                      ? _buildSearchResults()
-                      : _buildCategoryList(),
+                      ? _buildSearchResults(fontSize)
+                      : _buildCategoryList(fontSize),
         ),
 
-        if (_selectedServices.isNotEmpty) _buildSelectedServices(),
+        if (_selectedServices.isNotEmpty) _buildSelectedServices(fontSize),
       ],
     );
   }
 
-  Widget _buildSearchResults() {
+  Widget _buildSearchResults(double fontSize) {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       itemCount: _filteredServices.length,
@@ -161,6 +204,7 @@ class _StepServicesState extends State<StepServices> {
             style: TextStyle(
               fontFamily: 'Inter',
               fontWeight: FontWeight.w500,
+              fontSize: fontSize,
               color: AppColors.textPrimary,
             ),
           ),
@@ -168,7 +212,7 @@ class _StepServicesState extends State<StepServices> {
             service['category'],
             style: TextStyle(
               fontFamily: 'Inter',
-              fontSize: 12,
+              fontSize: fontSize - 2,
               color: AppColors.textSecondary,
             ),
           ),
@@ -178,7 +222,7 @@ class _StepServicesState extends State<StepServices> {
     );
   }
 
-  Widget _buildCategoryList() {
+  Widget _buildCategoryList(double fontSize) {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       itemCount: ServicesData.categories.length,
@@ -197,6 +241,7 @@ class _StepServicesState extends State<StepServices> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w600,
+                  fontSize: fontSize,
                   color: AppColors.textPrimary,
                 ),
               ),
@@ -220,6 +265,7 @@ class _StepServicesState extends State<StepServices> {
                       service['name'],
                       style: TextStyle(
                         fontFamily: 'Inter',
+                        fontSize: fontSize,
                         color: AppColors.textPrimary,
                       ),
                     ),
@@ -232,7 +278,7 @@ class _StepServicesState extends State<StepServices> {
     );
   }
 
-  Widget _buildSelectedServices() {
+  Widget _buildSelectedServices(double fontSize) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -251,7 +297,7 @@ class _StepServicesState extends State<StepServices> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w600,
-                  fontSize: 14,
+                  fontSize: fontSize,
                   color: AppColors.textPrimary,
                 ),
               ),
@@ -268,7 +314,7 @@ class _StepServicesState extends State<StepServices> {
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w500,
-                    fontSize: 14,
+                    fontSize: fontSize,
                     color: AppColors.error,
                   ),
                 ),
@@ -287,9 +333,12 @@ class _StepServicesState extends State<StepServices> {
                 return Chip(
                   label: Text(
                     service['name'],
-                    style: const TextStyle(fontFamily: 'Inter', fontSize: 13),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: fontSize - 2,
+                    ),
                   ),
-                  deleteIcon: const Icon(Icons.close, size: 16),
+                  deleteIcon: Icon(Icons.close, size: 16),
                   onDeleted: () => _toggleService(service),
                   backgroundColor: AppColors.primary.withAlpha(20),
                   side: BorderSide.none,

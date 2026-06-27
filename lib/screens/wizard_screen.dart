@@ -36,6 +36,29 @@ class _WizardScreenState extends State<WizardScreen> {
     ),
   ];
 
+  // ========== RESPONSIVE HELPERS ==========
+
+  double _getFontSize(double baseSize) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return baseSize * 0.85;
+    if (screenWidth > 600) return baseSize * 1.1;
+    return baseSize;
+  }
+
+  double _getPadding(double basePadding) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return basePadding * 0.7;
+    if (screenWidth > 600) return basePadding * 1.2;
+    return basePadding;
+  }
+
+  double _getIconSize() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth < 380) return 70;
+    if (screenWidth > 600) return 120;
+    return 100;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +88,10 @@ class _WizardScreenState extends State<WizardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final fontSize = _getFontSize(16.0);
+    final padding = _getPadding(40.0);
+    final iconSize = _getIconSize();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -79,7 +106,7 @@ class _WizardScreenState extends State<WizardScreen> {
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontWeight: FontWeight.w500,
-                    fontSize: 16,
+                    fontSize: fontSize,
                     color: AppColors.textSecondary,
                   ),
                 ),
@@ -95,7 +122,7 @@ class _WizardScreenState extends State<WizardScreen> {
                   });
                 },
                 itemBuilder: (context, index) {
-                  return _buildSlide(_slides[index]);
+                  return _buildSlide(_slides[index], fontSize, padding, iconSize);
                 },
               ),
             ),
@@ -127,14 +154,14 @@ class _WizardScreenState extends State<WizardScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 13,
+                    fontSize: fontSize - 3,
                     color: AppColors.accent,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+              padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
               child: SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -152,10 +179,10 @@ class _WizardScreenState extends State<WizardScreen> {
                     _currentPage == _slides.length - 1
                         ? 'Get Started'
                         : 'Next',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w600,
-                      fontSize: 16,
+                      fontSize: fontSize,
                     ),
                   ),
                 ),
@@ -167,41 +194,41 @@ class _WizardScreenState extends State<WizardScreen> {
     );
   }
 
-  Widget _buildSlide(WizardSlide slide) {
+  Widget _buildSlide(WizardSlide slide, double fontSize, double padding, double iconSize) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
+      padding: EdgeInsets.symmetric(horizontal: padding),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SvgPicture.asset(
             slide.iconPath,
-            height: 100,
-            width: 100,
+            height: iconSize,
+            width: iconSize,
             colorFilter: const ColorFilter.mode(
               AppColors.primary,
               BlendMode.srcIn,
             ),
           ),
-          const SizedBox(height: 48),
+          SizedBox(height: fontSize * 3),
           Text(
             slide.headline,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontWeight: FontWeight.w700,
-              fontSize: 24,
+              fontSize: fontSize + 8,
               color: AppColors.textPrimary,
               height: 1.3,
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: fontSize),
           Text(
             slide.body,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontWeight: FontWeight.w400,
-              fontSize: 16,
+              fontSize: fontSize,
               color: AppColors.textSecondary,
               height: 1.5,
             ),

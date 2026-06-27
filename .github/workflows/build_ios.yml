@@ -26,7 +26,10 @@ jobs:
           sed -i '' 's/DEVELOPMENT_TEAM =.*;/DEVELOPMENT_TEAM = 62K3DY93D7;/g' Runner.xcodeproj/project.pbxproj
 
       - name: Build unsigned IPA
-        run: flutter build ios --release --no-codesign
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=GOOGLE_MAPS_API_KEY_ANDROID=${{ secrets.GOOGLE_MAPS_API_KEY_ANDROID }} \
+            --dart-define=GOOGLE_MAPS_API_KEY_IOS=${{ secrets.GOOGLE_MAPS_API_KEY_IOS }}
 
       - name: Package IPA
         run: |
